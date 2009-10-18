@@ -1,0 +1,6 @@
+=== version 0.0.1 (10/18/2009)
+
+- Running Java OTP node wrapping Open Sesame repository: connection, query, and storing of RDF/XML, N3 and Turtle RDF graphs.
+- Erlang OTP application managing the execution of web applications.
+- Support for connection to the Java OTP node.
+- Console connection for interactively testing the running application.

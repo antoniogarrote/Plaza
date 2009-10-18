@@ -1,0 +1,26 @@
+#!/bin/bash
+
+args=$@
+notfound=true
+
+for i in ${args[@]}; do
+    if [[ $i == "-version" ]] ; then
+        notfound=false
+        erl -noshell -pa ebin -pa contrib -run plaza_app show_version -s init stop;
+    else
+        if [[ $i == "-help" ]] ; then
+            notfound=false
+            erl -noshell -pa ebin -pa contrib -run plaza_app show_help -s init stop;
+        else
+            if [[ $i == "-console" ]] ; then
+                notfound=false
+                erl -pa ebin -pa contrib -run plaza_app cmd_console_start $@
+            fi
+        fi
+    fi
+done
+
+if $notfound ; then
+#    erl -noshell -pa ebin -pa contrib -run egearmand_app cmd_start $@
+    erl -pa ebin -pa contrib -run plaza_app cmd_app_start $@
+fi

@@ -1,0 +1,82 @@
+Plaza will be a non object oriented, non SQL based, non MVC centered web framework for building web applications consisting of sets of semantic RESTful web services.
+
+
+=== Current state
+
+This is still work in the very early stages of progress.
+A Java OTP node wrapping the Sesame repository has been built. The structure for the Erlang has been set up and the console server can be used
+to start, modify and query the triples store in the repository.
+
+
+=== Dependencies
+
+Plaza is built in Erlang with some drops of Java.
+As a repository for semantic data, the Open Sesame RDF repository is currently used (Allegro graph support is planned).
+The application is built using Sinan for Erlang code and Maven for the Java bytes.
+
+The whole list of dependencies is:
+
+-Sinan
+-Maven2
+-Open Sesame
+
+
+=== Building
+
+Some of the Java dependencies must be installed manually. They can be found in the deps directory of the
+src/java/ErlangSesameAdapter/deps directory. Check the Maven warnings.
+
+- Erlang:
+$ cd src/erlang/plaza
+$ sinan
+$ sinan test
+
+- Java
+$ cd src/java/ErlangSesameAdapter
+$ mvn compile
+
+
+=== Running
+
+Start the Sesame wrapper OTP node. You must provide the sname for the java node (sesame in this case). Make sure you have all the
+dependencies in the class path:
+
+$java -cp ./target/classes plaza.node.RepositoryNode sesame
+
+A plaza application, is formed by the plaza OTP application and the web application(s) running on them. The web application code
+requires some mandatory Erlang nodes to be implemented. One demo application is stored in the src/erlang/plaza/test_app.
+
+The file /src/erlang/plaza/test_app/repository.erl contains the configuration of the Sesame repository where the application will
+store semantic data. This file must be edited with the right sname for the Java OTP node. The code of this sample application
+can be compile using rake:
+
+$ cd src/erlang/plaza/test_app
+$ rake
+
+Once this configuration is finished, the Plaza application can be started with the script/plaza script, from the directory
+src/erlang/plaza/lib/plaza/ execute:
+
+$ cd src/erlang/plaza/lib/plaza/
+$ ./scripts/plaza -app_name demo_application -app_module demo_application -pa ../../../test_app/ebin/ -sname plaza
+
+
+This will start the plaza OTP aplication and the demo test_app, using the sname plaza@node for the Erlang node.
+
+To test the connection to the repository, the plaza console can be started for the demo application using the -console
+fllag:
+
+$ ./scripts/plaza -app_name demo_application -app_module demo_application -console -pa ../../../test_app/ebin/ -sname plaza
+(plaza@erlang-node)1> console:repository_connect() .
+
+(plaza@erlang-node)2> console:repository_add_encoded_triples("http://test.com/test",<<"<rdf:RDF xmlns:rdf='http://www.w3.org/1999/02/22-rdf-syntax-ns#' xmlns:ex='http://www.example.org/'><rdf:Description rdf:about='http://www.example.org/vincent_donofrio'><ex:starred_in><ex:tv_show rdf:about='http://www.example.org/law_and_order_ci' /></ex:starred_in></rdf:Description><rdf:Description rdf:about='http://www.example.org/the_thirteenth_floor'><ex:similar_plot_as rdf:resource='http://www.example.org/the_matrix' /></rdf:Description></rdf:RDF>">>, "rdfxml") .
+
+(plaza@erlang-node)3> console:repository_sparql_query(<<"SELECT ?s ?p ?o WHERE { ?s ?p ?o }">>) .
+[[{s,<<"http://www.example.org/vincent_donofrio">>},
+  {p,<<"http://www.example.org/starred_in">>},
+  {o,<<"http://www.example.org/law_and_order_ci">>}],
+ [{s,<<"http://www.example.org/law_and_order_ci">>},
+  {p,<<"http://www.w3.org/1999/02/22-rdf-syntax-ns#type">>},
+  {o,<<"http://www.example.org/tv_show">>}],
+ [{s,<<"http://www.example.org/the_thirteenth_floor">>},
+  {p,<<"http://www.example.org/similar_plot_as">>},
+  {o,<<"http://www.example.org/the_matrix">>}]]

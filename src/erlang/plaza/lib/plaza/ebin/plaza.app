@@ -1,0 +1,17 @@
+%% This is the application resource file (.app file) for the plaza,
+%% application.
+{application, plaza, 
+  [{description, "Plaza RESTful semantic web framework"},
+   {vsn, "0.0.1"},
+   {modules, [plaza_app,
+              plaza_sup,
+              plaza_applications_controller,
+              plaza_application_proxy,
+              plaza_repository,
+              plaza_utils,
+              console]},
+   {registered,[plaza_sup]},
+   {applications, [kernel, stdlib]},
+   {mod, {plaza_app,[]}},
+   {start_phases, []}]}.
+
