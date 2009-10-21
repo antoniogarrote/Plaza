@@ -15,7 +15,7 @@
 -export([connect/1, add_encoded_triples/4, sparql_query/2]) .
 
 
-%% Some definitions of the messagex exchanged with the
+%% Some definitions of the messages exchanged with the
 %% repository Java node
 -define(REPOSITORY_JAVA_MBOX, triples_repository) .
 -define(CONNECT_MESSAGE, connect) .

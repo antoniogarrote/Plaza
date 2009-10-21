@@ -14,7 +14,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([start_link/0, start_plaza_application/1]) .
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
 %% Public API
@@ -51,6 +51,10 @@ handle_cast(_Msg, State) ->
 
 handle_info(_Msg, State) ->
     {noreply, State}.
+
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State} .
 
 
 terminate(shutdown, _State) ->

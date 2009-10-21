@@ -1,3 +1,9 @@
+=== version 0.0.2 (10/21/2009)
+
+- Triple and URIs manipulation functions.
+- Support for vocabularies (ontologies).
+
+
 === version 0.0.1 (10/18/2009)
 
 - Running Java OTP node wrapping Open Sesame repository: connection, query, and storing of RDF/XML, N3 and Turtle RDF graphs.

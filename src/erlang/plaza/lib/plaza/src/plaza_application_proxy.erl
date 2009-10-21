@@ -15,7 +15,7 @@
 -include_lib("states.hrl").
 
 -export([start_link/1, get_configuration/1]) .
--export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+-export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
 %% Public API
@@ -50,6 +50,10 @@ handle_info(_Msg, State) ->
     {noreply, State}.
 
 
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State} .
+
+
 terminate(shutdown, _State) ->
     ok.
 
@@ -60,6 +64,7 @@ terminate(shutdown, _State) ->
 make_initial_state(Options) ->
     AppModule   = list_to_atom(plaza_utils:proplist_find(app,Options)),
     RepoModule  = apply(AppModule, repository_module, []),
+    VocabularyModule = apply(AppModule, vocabulary_module, []),
     Environment = case plaza_utils:proplist_find(env,Options) of
                       none -> development ;
                       Env  -> list_to_atom(Env)
@@ -67,4 +72,11 @@ make_initial_state(Options) ->
     #plaza_app{name =  list_to_atom(plaza_utils:proplist_find(name,Options)),
                application_module = AppModule,
                repository_module = RepoModule,
-               environment = Environment } .
+               environment = Environment,
+               vocabulary = compile_vocabulary([plaza_core_ontology:vocabulary() |
+                                                lists:map(fun(L) -> plaza_vocabulary:make(L) end,
+                                                          apply(VocabularyModule, vocabulary, []))]) } .
+
+
+compile_vocabulary(Vocabularies) ->
+    plaza_vocabulary:merge(Vocabularies) .
