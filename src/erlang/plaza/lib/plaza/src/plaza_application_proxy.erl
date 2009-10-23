@@ -34,7 +34,10 @@ get_configuration(ApplicationName) ->
 
 
 init(Options) ->
-    {ok, make_initial_state(Options)}.
+    ProxyState = make_initial_state(Options),
+    ServerOptions = ProxyState#plaza_app.server_options,
+    plaza_applications_controller:start_server(ServerOptions),
+    {ok, ProxyState}  .
 
 
 handle_call(get_configuration, _From, State) ->
@@ -69,10 +72,13 @@ make_initial_state(Options) ->
                       none -> development ;
                       Env  -> list_to_atom(Env)
                   end,
+    ServerOptions = apply(AppModule, server_configuration, []),
+
     #plaza_app{name =  list_to_atom(plaza_utils:proplist_find(name,Options)),
                application_module = AppModule,
                repository_module = RepoModule,
                environment = Environment,
+               server_options = ServerOptions,
                vocabulary = compile_vocabulary([plaza_core_ontology:vocabulary() |
                                                 lists:map(fun(L) -> plaza_vocabulary:make(L) end,
                                                           apply(VocabularyModule, vocabulary, []))]) } .

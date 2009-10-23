@@ -5,5 +5,5 @@
 -export([vocabulary/0]) .
 
 
-repository_connection() ->
-    [{test_app, <<"http://plaza-framework.org/test_app#">>}] .
+vocabulary() ->
+    [ [{test_app, <<"http://plaza-framework.org/test_app#">>}] ] .

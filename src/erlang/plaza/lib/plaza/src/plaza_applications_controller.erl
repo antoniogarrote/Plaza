@@ -11,9 +11,10 @@
 
 -behaviour(gen_server) .
 
+-include_lib("states.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
--export([start_link/0, start_plaza_application/1]) .
+-export([start_link/0, start_plaza_application/1, start_server/1]) .
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
@@ -28,27 +29,38 @@ start_plaza_application(Options) ->
     gen_server:call(?MODULE, {start_plaza_application, Options}) .
 
 
+start_server(Options) ->
+    gen_server:cast(?MODULE, {start_web_server, Options}) .
+
+
 %% Callbacks
 
 
-init(State) ->
-    {ok, State }.
+init(_State) ->
+    {ok, #app_controller{} }.
 
 
-handle_call({start_plaza_application, Options}, _From, State) ->
+handle_call({start_plaza_application, Options}, _From, #app_controller{ apps=Apps } = State) ->
     {NewState, Result} = case proplists:lookup(name,Options) of
                              none         -> {State, {error, "no name for application to start"}} ;
                              {name, Name} -> Pid = plaza_application_proxy:start_link(Options),
-                                             {[{list_to_atom(Name), Pid} | State], ok}
+                                             {State#app_controller{ apps=[{list_to_atom(Name), Pid} | Apps] }, ok}
                          end,
     {reply, Result, NewState} .
 
 
+handle_cast({start_web_server, Options}, #app_controller{ servers=Servers } = State) ->
+    {port,Port} = proplists:lookup(port,Options),
+    Identifier = list_to_atom(lists:flatten(io_lib:format("plaza_server_~p",[Port]))),
+    {_Result, NewState} = case lists:member(Identifier, Servers) of
+                              false  -> plaza_mochiweb_adapter:start_link(Identifier,Options),
+                                        {ok,State#app_controller{ servers = [Identifier | Servers] }} ;
+                              true   -> {error, State}
+                          end,
+    {noreply, NewState} .
+
+
 %% dummy callbacks so no warning are shown at compile time
-handle_cast(_Msg, State) ->
-    {noreply, State} .
-
-
 handle_info(_Msg, State) ->
     {noreply, State}.
 

@@ -13,7 +13,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 
--export([make/1, resolve/2]) .
+-export([make/1, resolve/2, merge/1]) .
 
 
 %% This implementation of a vocabulary is defined in terms

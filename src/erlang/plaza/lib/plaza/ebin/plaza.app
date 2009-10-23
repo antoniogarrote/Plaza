@@ -2,7 +2,7 @@
 %% application.
 {application, plaza,
   [{description, "Plaza RESTful semantic web framework"},
-   {vsn, "0.0.2"},
+   {vsn, "0.0.3"},
    {modules, [plaza_app,
               plaza_sup,
               plaza_applications_controller,
@@ -11,6 +11,7 @@
               plaza_triples,
               plaza_vocabulary,
               plaza_core_ontology,
+              plaza_mochiweb_adapter,
               plaza_utils,
               console]},
    {registered,[plaza_sup]},
