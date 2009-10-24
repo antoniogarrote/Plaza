@@ -1,0 +1,1 @@
+-define(RDF_XML, "rdfxml") .

@@ -31,10 +31,13 @@ make(Proplist) ->
 
 %% @doc
 %% Searches for a term in the vocabulary.
+resolve(Vocabulary, Term) when is_list(Term) ->
+    resolve(Vocabulary, list_to_atom(Term)) ;
+
 resolve(Vocabulary,Term) ->
     case dict:find(Term, Vocabulary) of
         {ok, Value}   -> Value ;
-        error         -> erlang:error("error resolving term",Vocabulary)
+        error         -> error
 
     end .
 

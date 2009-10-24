@@ -63,7 +63,10 @@ init([]) ->
      PlazaApplicationsController  = {plaza_applications_controller, {plaza_applications_controller, start_link, []},
                                      Restart, Shutdown, Type, [plaza_applications_controller]},
 
-    {ok, {SupFlags, [PlazaApplicationsController]}}.
+     PlazaWebserversController  = {plaza_webservers_controller, {plaza_webservers_controller, start_link, []},
+                                     Restart, Shutdown, Type, [plaza_webservers_controller]},
+
+    {ok, {SupFlags, [PlazaApplicationsController, PlazaWebserversController]}}.
 
 %%%===================================================================
 %%% Internal functions

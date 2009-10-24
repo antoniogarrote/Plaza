@@ -11,7 +11,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([proplist_find/2, select_environment/2, to_binary/1, split/2]) .
+-export([proplist_find/2, select_environment/2, to_binary/1, split/2, strip_protocol/1, strip_protocol_domain/1]) .
 
 
 %% Public API
@@ -38,9 +38,27 @@ to_binary(Data) when is_atom(Data)   ->
 split(Str, Regex) ->
     lists:filter(fun(L) -> L =/= [] end,re:split(Str,Regex,[{return,list}])).
 
+strip_protocol(Uri) ->
+    [Protocol, Rest] = split(Uri,"://"),
+    {Protocol,Rest} .
+
+strip_protocol_domain(Uri) ->
+    {Protocol,Tmp} = strip_protocol(Uri),
+    [Domain | Rest] = split(Tmp, "/"),
+    {Protocol ++ "://" ++ Domain, lists:foldl(fun(Part,Acum) -> Acum ++ "/" ++ Part end, "", Rest)} .
 
 
 %% Tests
+
+
+strip_protocol_test() ->
+    ?assertEqual({"http","test.com/test"},strip_protocol("http://test.com/test")),
+    ?assertEqual({"ftp","test.com/test"},strip_protocol("ftp://test.com/test")) .
+
+
+strip_protocol_domain_test() ->
+    ?assertEqual({"http://test.com","/test/:a/b"},strip_protocol_domain("http://test.com/test/:a/b")),
+    ?assertEqual({"ftp://test.com:3000","/test/c/d.e"},strip_protocol_domain("ftp://test.com:3000/test/c/d.e")) .
 
 
 proplist_find_test() ->

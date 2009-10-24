@@ -14,18 +14,19 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("http_records.hrl").
 
--export([start_link/2, update_routes/2, loop/3, handle_request/2, header/2]) .
+-export([start_link/2, update_routes/3, loop/3, handle_request/2, header/2]) .
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
 %% Public API
 
-start_link(Name,Options) ->
+
+start_link(Name, Options) ->
     gen_server:start_link({local, Name}, ?MODULE, {Name,Options}, []) .
 
 
-update_routes(Name,Routes) ->
-    gen_server:call(Name, {update_routes, Routes}) .
+update_routes(Name, Routes, Application) ->
+    gen_server:call(Name, {update_routes, Routes, Application}) .
 
 
 %% Callbacks
@@ -40,10 +41,11 @@ init({Name,Options}) ->
     {ok, []}.
 
 
-handle_call({update_routes, NewRoutes}, _From, Routes) ->
+handle_call({update_routes, NewRoutes, Application}, _From, Routes) ->
     UpdatedRoutes = lists:map(fun({Pattern, Action}) ->
-                                      { process_path_pattern(Pattern),
-                                        Action }
+                                      { plaza_web:process_path_pattern(Pattern),
+                                        Action,
+                                        Application }
                               end,
                               NewRoutes),
     {reply, ok, Routes ++ UpdatedRoutes } .
@@ -76,17 +78,10 @@ terminate(shutdown, _State) ->
 %% @doc
 %% Handles a mochiweb incoming request
 handle_request(Request, Routes) ->
-    Request = make_request(Request),
-    Response = route(Request, Routes),
+    error_logger:info_msg("received web request: ~p", [Request]),
+    PlazaRequest = make_request(Request),
+    Response = route(PlazaRequest, Routes),
     do_response(Response,Request) .
-
-%%     Method = Request#request.method,
-%%     Path = Request#request.path,
-%%     Headers = Request#request.headers,
-%%     Parameters = Request#request.parameters,
-%%     Req:respond({200,
-%%                  [{"Content-type", "plain/text"}],
-%%                  lists:flatten(io_lib:format("Method:~p~nPath:~p~nHeaders:~p~nParameters:~p~n",[Method,Path,Headers,Parameters]))}) .
 
 
 %% @doc
@@ -113,41 +108,19 @@ match_path([Pattern|Patterns], [Path|Paths], Request) ->
 
 
 %% @doc
-%% Process a string with a request pattern, transforming it into a
-%% list of pattern tokens.
-process_path_pattern(Pattern) ->
-    Elements = plaza_utils:split(Pattern, "/"),
-    HasDot = lists:member($.,lists:nth(1,lists:reverse(Elements))),
-    ElementsP = if
-                    HasDot =:= true ->
-                        [ToSplit | Rest] = lists:reverse(Elements),
-                        Splitted = plaza_utils:split(ToSplit, "\\."),
-                        lists:reverse(Rest) ++ Splitted ;
-                    true ->
-                        Elements
-                end,
-    lists:map( fun(Elem) ->
-                       HasColon = (lists:nth(1,Elem) =:= $:),
-                       if
-                           HasColon =:= true ->
-                               {_Colon, Val} = lists:split(1,Elem),
-                               list_to_atom(Val) ;
-                           true ->
-                               Elem
-                       end
-               end,
-               ElementsP) .
-
-%% @doc
 %% Provided a set of routes and a plaza request,
 %% return {ok, action()} if any route matches or
 %% error in any other case.
 route(Request, Routes) ->
-    RequestPathTokens = plaza_utils:split(Request#request.path),
+    RequestPathTokens = plaza_web:process_path_pattern(Request#request.path),
+    error_logger:info_msg("routing: ~p", [RequestPathTokens]),
     case do_route(RequestPathTokens, Routes,Request) of
-        {ok, [M,F], Request} -> M:F(Request, #response{}, []) ;
-        {ok, F, Request}     -> F(Request, #response{}, []) ;
-        {error, Request}     -> #response{ code = 404,
+        {ok, {M,F}, Request, Application} -> error_logger:info_msg("routing success, routing to: ~p", [{M,F}]),
+                                             M:F(Request, #response{}, [], Application) ;
+        {ok, F, Request, Application}     -> error_logger:info_msg("routing success, routing to: ~p", [F]),
+                                             F(Request, #response{}, [], Application) ;
+        {error, Request}     -> error_logger:info_msg("routing error", []),
+                                #response{ code = 404,
                                            headers = [{"Content-Type", "application/json"},
                                                       {"Charset", "UTF8"}],
                                            body = "\"Unknown resource\"" }
@@ -157,9 +130,9 @@ route(Request, Routes) ->
 
 do_route(_Path, [], Request) ->
     {error, Request} ;
-do_route(Path, [{Pattern, Action} | Routes], Request) ->
+do_route(Path, [{Pattern, Action, Application} | Routes], Request) ->
     case match_path(Pattern, Path, Request) of
-        {ok, Request}  -> {ok, Action, Request} ;
+        {ok, Request}  -> {ok, Action, Request, Application} ;
         error          -> do_route(Path, Routes, Request)
     end .
 
@@ -216,13 +189,3 @@ match_path_a_test() ->
                                    end,
                             Req),
                  error) .
-
-process_path_pattern_test() ->
-    PatternA = process_path_pattern("/this/is/a/test"),
-    ?assertEqual(["this","is","a","test"], PatternA),
-    PatternB = process_path_pattern("/this/is/a/*"),
-    ?assertEqual(["this","is","a","*"], PatternB),
-    PatternC = process_path_pattern("/this/:verb/:article/*"),
-    ?assertEqual(["this",verb,article,"*"], PatternC),
-    PatternD = process_path_pattern("/this/:verb/:article/*/or.something"),
-    ?assertEqual(["this",verb,article,"*","or","something"], PatternD) .

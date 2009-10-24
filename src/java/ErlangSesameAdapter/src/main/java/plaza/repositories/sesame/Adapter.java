@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import org.openrdf.model.impl.URIImpl;
 import org.openrdf.query.BindingSet;
 import org.openrdf.repository.Repository;
 import org.openrdf.repository.RepositoryConnection;
@@ -103,11 +104,11 @@ public class Adapter implements plaza.repositories.interfaces.Adapter {
         RepositoryConnection con = repository.getConnection();
         try {
             if(format.equalsIgnoreCase(RDFXML)) {
-                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.RDFXML);
+                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.RDFXML,new URIImpl(baseUri));
             } else if(format.equalsIgnoreCase(N3)) {
-                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.N3);
+                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.N3, new URIImpl(baseUri));
             } else if(format.equalsIgnoreCase(TURTLE)) {
-                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.TURTLE);
+                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.TURTLE, new URIImpl(baseUri));
             } else {
                 throw new Exception("Unsupported format " + format);
             }
