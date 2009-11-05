@@ -80,6 +80,7 @@ terminate(shutdown, _State) ->
 handle_request(Request, Routes) ->
     error_logger:info_msg("received web request: ~p", [Request]),
     PlazaRequest = make_request(Request),
+    error_logger:info_msg("routing: ~p", [Request]),
     Response = route(PlazaRequest, Routes),
     do_response(Response,Request) .
 
@@ -93,13 +94,15 @@ match_path(_Path, ["*"], Request) ->
     {ok, Request} ;
 match_path(_Pattern, [], _Request) ->
     error ;
+match_path([], _Pattern, _Request) ->
+    error ;
 match_path(Pattern, F, Request) when is_function(F) ->
     case F(Pattern,Request) of
         {ok, Result} -> {ok, Result} ;
         _Other       -> error
     end ;
-match_path([Pattern|Patterns], [Path|Paths], #request{ parameters = Params} = Request) when is_atom(Path)  ->
-    match_path(Patterns, Paths, Request#request{ parameters = [{Path, Pattern} | Params]}) ;
+match_path([Pattern|Patterns], [Path|Paths], #request{ parameters = Params} = Request) when is_atom(Pattern)  ->
+    match_path(Patterns, Paths, Request#request{ parameters = [{Pattern,Path} | Params]}) ;
 match_path([Pattern|Patterns], [Path|Paths], Request) ->
     case Pattern =:= Path of
         true  -> match_path(Patterns, Paths, Request) ;
@@ -113,27 +116,56 @@ match_path([Pattern|Patterns], [Path|Paths], Request) ->
 %% error in any other case.
 route(Request, Routes) ->
     RequestPathTokens = plaza_web:process_path_pattern(Request#request.path),
-    error_logger:info_msg("routing: ~p", [RequestPathTokens]),
+    error_logger:info_msg("routing: ~p in ~p", [RequestPathTokens, lists:map(fun({R,P,_A}) -> {R,P} end, Routes)]),
+    State = plaza_web:state_new(),
     case do_route(RequestPathTokens, Routes,Request) of
-        {ok, {M,F}, Request, Application} -> error_logger:info_msg("routing success, routing to: ~p", [{M,F}]),
-                                             M:F(Request, #response{}, [], Application) ;
-        {ok, F, Request, Application}     -> error_logger:info_msg("routing success, routing to: ~p", [F]),
-                                             F(Request, #response{}, [], Application) ;
-        {error, Request}     -> error_logger:info_msg("routing error", []),
-                                #response{ code = 404,
-                                           headers = [{"Content-Type", "application/json"},
-                                                      {"Charset", "UTF8"}],
-                                           body = "\"Unknown resource\"" }
+        {ok, {resource,R}, RequestP, ApplicationP} -> error_logger:info_msg("routing success, routing to resource: ~p", [R]),
+                                                      process_resource(R, RequestP, #response{}, State, ApplicationP) ;
+        {ok, {M,F}, RequestP, ApplicationP}        -> error_logger:info_msg("routing success, routing to: ~p", [{M,F}]),
+                                                      M:F(RequestP, #response{}, State, ApplicationP) ;
+        {ok, F, RequestP, ApplicationP}            -> error_logger:info_msg("routing success, routing to: ~p", [F]),
+                                                      F(RequestP, #response{}, State, ApplicationP) ;
+        {error, _RequestP}                         -> error_logger:info_msg("routing error", []),
+                                                      #response{ code = 404,
+                                                                 headers = [{"Content-Type", "text/plain"},
+                                                                            {"Charset", "utf-8"}],
+                                                                 body = "\"Unknown resource\"" }
     end.
+
+
+%% @doc
+%% Process the routing of a request to a resource through the
+%% the cycle of lifting, operation and lowering.
+process_resource(Resource, Request, Response, State, Application) ->
+    do_processing_resource([lifting, operation, lowering], Resource, Request, Response, State, Application) .
+
+do_processing_resource([], _Resource, _Request, Response, _State, _Application) ->
+    Response ;
+do_processing_resource([S | Stages], Resource, Request, Response, State, Application) ->
+    Method = Request#request.method,
+    case apply(Resource, S, [Method, Request, Response, State, Application]) of
+        {ok, [_M, _R, ResponseP, StateP, _A, _Res]} -> do_processing_resource(Stages, Resource, Request, ResponseP, StateP, Application) ;
+        {error, Reason}                             -> error_logger:info_msg("Error processing resource", [Resource, Reason]),
+                                                       #response{ code = 500,
+                                                                  headers = [{"Content-Type", "text/plain"},
+                                                                             {"Charset", "UTF-8"}],
+                                                                  body = lists:flatten(io_lib:format("~p",[Reason])) }
+    end .
 
 
 
 do_route(_Path, [], Request) ->
+    error_logger:info_msg("Routing returning error",[]),
     {error, Request} ;
 do_route(Path, [{Pattern, Action, Application} | Routes], Request) ->
+    error_logger:info_msg("Routing try:~p <-> ~p",[Pattern, Path]),
     case match_path(Pattern, Path, Request) of
-        {ok, Request}  -> {ok, Action, Request, Application} ;
-        error          -> do_route(Path, Routes, Request)
+        {ok, RequestP}  -> error_logger:info_msg("Routing ok:~p <-> ~p",[Pattern, Path]),
+                           {ok, Action, RequestP, Application} ;
+        error           -> error_logger:info_msg("Routing error:~p <-> ~p",[Pattern, Path]),
+                           do_route(Path, Routes, Request) ;
+        Other           -> error_logger:info_msg("Routing WTF!!???:~p <-> ~p = ~p",[Pattern, Path, Other]),
+                           {ok, Action, Request, Application}
     end .
 
 
@@ -144,6 +176,10 @@ loop(Name, Req, _DocRoot) ->
 %% @doc
 %% Creates a new request from the mochiweb equivalent
 make_request(Req) ->
+    error_logger:info_msg("making request method: ~p", [Req:get(method)]),
+    error_logger:info_msg("making request path: ~p", [Req:get(path)]),
+    error_logger:info_msg("making request headers: ~p", [Req:get(headers)]),
+    error_logger:info_msg("making request parameters: ~p", [Req:parse_qs() ++ Req:parse_post()]),
     #request{ method = Req:get(method),
               path = Req:get(path),
               headers = Req:get(headers),
@@ -161,6 +197,7 @@ header(Req,Key) ->
 %% @doc
 %% Composes a mochiweb response from plaza response record.
 do_response(Response, Request) ->
+    error_logger:info_msg("Sending back response: ~p", [Response]),
     Request:respond({Response#response.code,
                      Response#response.headers,
                      Response#response.body}) .
@@ -174,7 +211,7 @@ match_path_a_test() ->
     ?assertEqual(match_path([],[],Req),{ok, Req}),
     ?assertEqual(match_path(["whatever"],["*"],Req),{ok,Req}),
     ?assertEqual(match_path(["whatever"],[],Req),error),
-    {ok,#request{ parameters = Params }} = match_path(["whatever"],[test],Req),
+    {ok,#request{ parameters = Params }} = match_path([test],["whatever"],Req),
     ?assertEqual(Params,[{test,"whatever"}]),
     {ok,#request{ parameters = ParamsB }} = match_path(["whatever"],["whatever"],Req),
     ?assertEqual(ParamsB,[]),
@@ -188,4 +225,6 @@ match_path_a_test() ->
                                            error
                                    end,
                             Req),
-                 error) .
+                 error),
+    {ok,#request{ parameters=ParamsC }} =  match_path(["Blogs",id],["Blogs","17a10803-f064-4718-ae46-4a6d3c88415c"],Req),
+    ?assertEqual(ParamsC,[{id,"17a10803-f064-4718-ae46-4a6d3c88415c"}]) .

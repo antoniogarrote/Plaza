@@ -7,4 +7,5 @@
                      routes :: term(),
                      webserver :: atom(),
                      environment :: atom(),
+                     namespaces :: {dict(), dict()},
                      vocabulary :: dict()}) .

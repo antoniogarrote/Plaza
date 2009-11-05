@@ -29,7 +29,7 @@
 % SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 %
 -module(uuid).
--export([v4/0, to_string/1, get_parts/1, string/0]).
+-export([v4/0, to_string/1, get_parts/1, string/0, seed/0]).
 -import(random).
 
 v4() ->
@@ -40,7 +40,14 @@ to_string(U) ->
     lists:flatten(io_lib:format("~8.16.0b-~4.16.0b-~4.16.0b-~2.16.0b~2.16.0b-~12.16.0b", get_parts(U))).
 
 string() ->
+    seed(),
     to_string(v4()) .
 
 get_parts(<<TL:32, TM:16, THV:16, CSR:8, CSL:8, N:48>>) ->
     [TL, TM, THV, CSR, CSL, N].
+
+seed() ->
+    {Y,M,D} = date(),
+    {H,Mi,S} = time(),
+    {A,B,C} = {Y+H, M+Mi, S+D},
+    random:seed(A,B,C) .

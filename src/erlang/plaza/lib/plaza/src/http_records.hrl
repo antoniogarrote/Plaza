@@ -5,6 +5,6 @@
                    parameters = [] :: [{string(), string()}] }) .
 
 -record(response, { code :: integer(),
-                    headers :: [{string(), string()}],
+                    headers = [] :: [{string(), string()}],
                     body :: binary() }) .
 

@@ -35,6 +35,7 @@ get_configuration(ApplicationName) ->
 
 init(Options) ->
     ProxyState = make_initial_state(Options),
+    plaza_repository:connect(ProxyState),
     ServerOptions = ProxyState#plaza_app.server_options,
     ServerName = plaza_webservers_controller:start_server(ServerOptions),
     Result = case ServerName of
@@ -86,6 +87,8 @@ make_initial_state(Options) ->
                server_options = ServerOptions,
                routes = Routes,
                environment = Environment,
+               namespaces = plaza_namespaces:merge([plaza_core_ontology:namespaces(),
+                                                    plaza_namespaces:make(apply(VocabularyModule, namespaces,[]))]),
                vocabulary = compile_vocabulary([plaza_core_ontology:vocabulary() |
                                                 lists:map(fun(L) -> plaza_vocabulary:make(L) end,
                                                           apply(VocabularyModule, vocabulary, []))]) } .

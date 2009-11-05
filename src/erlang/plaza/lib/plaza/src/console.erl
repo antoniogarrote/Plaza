@@ -12,7 +12,9 @@
 
 -export([start_link/1]) .
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
--export([repository_connect/0, repository_add_encoded_triples/3, repository_sparql_query/1]) .
+-export([repository_connect/0, repository_add_encoded_triples/3, repository_sparql_query/1, repository_full_graph/0]) .
+-export([repository_delete_graph/1]) .
+
 
 %% Public API
 
@@ -31,6 +33,14 @@ repository_add_encoded_triples(BaseUrl, Triples, Format) ->
 
 repository_sparql_query(Query) ->
     gen_server:call(?MODULE, {sparql_query, Query}) .
+
+
+repository_delete_graph(GraphName) ->
+    gen_server:call(?MODULE, {delete_graph, GraphName}) .
+
+
+repository_full_graph() ->
+    gen_server:call(?MODULE, {sparql_query, <<"SELECT ?s ?p ?o WHERE { ?s ?p ?o }">>}) .
 
 
 %% Callbacks
@@ -53,6 +63,10 @@ handle_call(repository_connect, _From, {_AppName, Config} = State) ->
 
 handle_call({repository_add_encoded_triples, BaseUrl, Triples, Format}, _From, {_AppName, Config} = State) ->
     Result = plaza_repository:add_encoded_triples(Config, BaseUrl, Triples, Format),
+    {reply, Result, State} ;
+
+handle_call({delete_graph, GraphName}, _From, {_AppName, Config} = State) ->
+    Result = plaza_repository:delete_graph(Config, GraphName),
     {reply, Result, State} ;
 
 handle_call({sparql_query, Query}, _From, {_AppName, Config} = State) ->

@@ -12,15 +12,34 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([proplist_find/2, select_environment/2, to_binary/1, split/2, strip_protocol/1, strip_protocol_domain/1]) .
+-export([to_atom/1, dict_find/2, subbitstring/2]) .
 
 
 %% Public API
+
+subbitstring(_BS1,BS2) when size(BS2) =:= 0 ->
+    false ;
+subbitstring(BS1, BS2) when size(BS1) =:= 0->
+    {ok, BS2} ;
+subbitstring(BS1, BS2) ->
+    <<H1:1/binary,R1/binary>> = BS1,
+    <<H2:1/binary,R2/binary>> = BS2,
+    case H1 == H2 of
+        true  -> subbitstring(R1,R2) ;
+        false -> false
+    end .
 
 
 proplist_find(Key, Props) ->
     case proplists:lookup(Key, Props) of
         none -> none ;
         {Key, Value} -> Value
+    end .
+
+dict_find(Key, Dict) ->
+    case dict:find(Key, Dict) of
+        error -> none ;
+        {ok, Value} -> Value
     end .
 
 
@@ -34,6 +53,13 @@ to_binary(Data) when is_binary(Data) ->
     Data ;
 to_binary(Data) when is_atom(Data)   ->
     list_to_binary(atom_to_list(Data)) .
+
+to_atom(Data) when is_list(Data) ->
+    list_to_atom(Data) ;
+to_atom(Data) when is_binary(Data) ->
+    list_to_atom(binary_to_list(Data)) ;
+to_atom(Data) when is_atom(Data) ->
+    Data .
 
 split(Str, Regex) ->
     lists:filter(fun(L) -> L =/= [] end,re:split(Str,Regex,[{return,list}])).
@@ -49,6 +75,15 @@ strip_protocol_domain(Uri) ->
 
 
 %% Tests
+
+subbitstring_test() ->
+    A = <<"test">>,
+    B = <<"test&something else">>,
+    Res = subbitstring(A,B),
+    ?assertEqual(Res,{ok, <<"&something else">>}),
+    C = <<"no way">>,
+    ResB = subbitstring(A,C),
+    ?assertEqual(ResB,false) .
 
 
 strip_protocol_test() ->
@@ -66,6 +101,12 @@ proplist_find_test() ->
     ?assertEqual("a", proplist_find(a, Data)),
     ?assertEqual(none, proplist_find(c, Data)) .
 
+dict_find_test() ->
+    Data = [{a, "a"}, {b, "b"}],
+    Dict = dict:from_list(Data),
+    ?assertEqual("a", dict_find(a, Dict)),
+    ?assertEqual(none, dict_find(c, Dict)) .
+
 select_environment_test() ->
     Data = [{development, [{a, "a"}]}, 
             {production,  [{b, "b"}]}],
@@ -75,3 +116,8 @@ to_binary_test() ->
     ?assertEqual(<<"test">>, to_binary("test")),
     ?assertEqual(<<"test">>, to_binary(<<"test">>)),
     ?assertEqual(<<"test">>, to_binary(test)) .
+
+to_atom_test() ->
+    ?assertEqual(test, to_atom("test")),
+    ?assertEqual(test, to_atom(<<"test">>)),
+    ?assertEqual(test, to_atom(test)) .

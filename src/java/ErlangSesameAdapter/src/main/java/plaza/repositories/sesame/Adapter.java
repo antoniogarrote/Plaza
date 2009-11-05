@@ -100,15 +100,21 @@ public class Adapter implements plaza.repositories.interfaces.Adapter {
      * The format of the triplets: (RDFXML, N3, TURTLE)
      * @throws Exception
      */
-    public void addTriples(String baseUri, String triplets, String format) throws Exception {
+    public void addTriples(String baseUri, String triplets, String[] contexts, String format) throws Exception {
         RepositoryConnection con = repository.getConnection();
+
+        URIImpl[] contextUris = new URIImpl[contexts.length];
+        for(int i=0; i<contexts.length; i++) {
+            contextUris[i] = new URIImpl(contexts[i]);
+        }
+
         try {
             if(format.equalsIgnoreCase(RDFXML)) {
-                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.RDFXML,new URIImpl(baseUri));
+                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.RDFXML,contextUris);
             } else if(format.equalsIgnoreCase(N3)) {
-                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.N3, new URIImpl(baseUri));
+                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.N3, contextUris);
             } else if(format.equalsIgnoreCase(TURTLE)) {
-                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.TURTLE, new URIImpl(baseUri));
+                con.add(new ByteArrayInputStream(triplets.getBytes()), baseUri, RDFFormat.TURTLE, contextUris);
             } else {
                 throw new Exception("Unsupported format " + format);
             }
@@ -157,6 +163,15 @@ public class Adapter implements plaza.repositories.interfaces.Adapter {
             }
             
             return new OtpErlangList(bindings.toArray(new OtpErlangObject[bindings.size()]));
+        }finally {
+            con.close();
+        }
+    }
+
+    public void delete(String graphUri) throws Exception {
+        RepositoryConnection con = repository.getConnection();
+        try {
+            con.clear(new URIImpl(graphUri));
         }finally {
             con.close();
         }

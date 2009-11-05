@@ -22,7 +22,9 @@ domain() ->
     "localhost:7777" .
 
 routes() ->
-    [{"/expose",{demo_application, expose_request}}] .
+    [{"/expose",    {demo_application, expose_request}},
+     {"/Blogs/:id", {resource, blog_resource}},
+     {"/Blogs",     {resource, blogs_resource}} ] .
 
 
 %% handlers

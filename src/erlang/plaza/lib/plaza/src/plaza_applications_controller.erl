@@ -33,6 +33,7 @@ start_plaza_application(Options) ->
 
 
 init(_State) ->
+    %% seed the random number generator
     {ok, #app_controller{} }.
 
 

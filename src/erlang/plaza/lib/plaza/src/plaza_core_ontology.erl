@@ -13,8 +13,12 @@
 -include_lib("eunit/include/eunit.hrl").
 
 
--export([vocabulary/0]) .
+-export([namespaces/0, vocabulary/0]) .
+
+
+namespaces() ->
+    plaza_namespaces:make([{rdf,<<"http://www.w3.org/1999/02/22-rdf-syntax-ns#">>}]) .
 
 
 vocabulary() ->
-    plaza_vocabulary:make([{rdf,<<"http://www.w3.org/1999/02/22-rdf-syntax-ns#">>}]) .
+    plaza_vocabulary:make([{type,<<"http://www.w3.org/1999/02/22-rdf-syntax-ns#type">>}]) .

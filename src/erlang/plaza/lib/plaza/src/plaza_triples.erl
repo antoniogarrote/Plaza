@@ -115,10 +115,7 @@ norm(Vocabulary, T) ->
 
 
 norm_set(Vocabulary, S) ->
-    lists:map(fun(T) ->
-                      error_logger:info_msg("normalizing:~p~n",[T]),
-                      norm(Vocabulary,T)
-              end,
+    lists:map(fun(T) -> norm(Vocabulary,T) end,
               gb_sets:to_list(S)) .
 
 %% Tests

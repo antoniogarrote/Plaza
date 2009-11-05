@@ -2,8 +2,12 @@
 
 -author("Antonio Garrote Hernandez") .
 
--export([vocabulary/0]) .
+-export([namespaces/0, vocabulary/0]) .
 
+namespaces() ->
+    blogs_resource:namespaces() .
 
 vocabulary() ->
-    [ [{test_app, <<"http://plaza-framework.org/test_app#">>}] ] .
+    [ [{test_app, {ns, <<"http://plaza-framework.org/test_app#">>}}],
+      %% Subset of the Dublin Core ontology
+      blogs_resource:vocabulary() ] .

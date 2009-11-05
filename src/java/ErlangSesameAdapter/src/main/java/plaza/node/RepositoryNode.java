@@ -45,11 +45,25 @@ public class RepositoryNode {
     private static void doAddTriplets(OtpErlangPid from, OtpErlangTuple msg, Adapter repository, OtpMbox mbox) {
         try {
             OtpErlangList propList = (OtpErlangList) msg.elementAt(2);
-            HashMap<String, String> map = OtpMapperUtils.otpStringPropsList(propList);
-            repository.addTriples(map.get("base"), map.get("triples"), map.get("format"));
+            HashMap<String, Object> map = OtpMapperUtils.otpStringObjPropsList(propList);
+            OtpErlangList ctxs = (OtpErlangList) map.get("contexts");
+
+            String base = (String) map.get("base");
+            String triples = (String) map.get("triples");
+            String format = (String) map.get("format");
+            
+            String[] contextUris = new String[ctxs.arity()];
+            for(int i=0; i<ctxs.arity(); i++) {
+                contextUris[i] = ((OtpErlangString) ctxs.elementAt(i)).stringValue();
+            }
+
+
+            repository.addTriples(base, triples, contextUris, format);
 
             mbox.send(from, new OtpErlangAtom("ok"));
         } catch (Exception ex) {
+            System.err.println(ex.getMessage());
+            ex.printStackTrace();
             OtpErlangObject[] reply = new OtpErlangObject[2];
             reply[0] = new OtpErlangAtom("error");
             reply[1] = new OtpErlangString(ex.getMessage());
@@ -70,6 +84,29 @@ public class RepositoryNode {
             reply[0] = new OtpErlangAtom("ok");
             reply[1] = result;
             
+            mbox.send(from, new OtpErlangTuple(reply));
+
+        } catch (Exception ex) {
+            OtpErlangObject[] reply = new OtpErlangObject[2];
+            reply[0] = new OtpErlangAtom("error");
+            reply[1] = new OtpErlangString(ex.getMessage());
+
+            mbox.send(from, new OtpErlangTuple(reply));
+        }
+    }
+
+    private static void doDeleteGraph(OtpErlangPid from, OtpErlangTuple msg, Adapter repository, OtpMbox mbox) {
+        try{
+            OtpErlangList propList = (OtpErlangList) msg.elementAt(2);
+            HashMap<String, String> map = OtpMapperUtils.otpStringPropsList(propList);
+            
+            String graphName = map.get("graph");
+            repository.delete(graphName);
+
+            OtpErlangObject[] reply = new OtpErlangObject[2];
+            reply[0] = new OtpErlangAtom("ok");
+            reply[1] = new OtpErlangString(graphName);
+
             mbox.send(from, new OtpErlangTuple(reply));
 
         } catch (Exception ex) {
@@ -117,6 +154,8 @@ public class RepositoryNode {
                                 RepositoryNode.doAddTriplets(from,msg,repository, _mbox);
                             } else if(operation.equalsIgnoreCase(Adapter.QUERY)) {
                                 RepositoryNode.doQuery(from,msg,repository, _mbox);
+                            } else if(operation.equalsIgnoreCase(Adapter.DELETE_GRAPH)) {
+                                RepositoryNode.doDeleteGraph(from,msg,repository, _mbox);
                             } else {
                                 // not implemented yet
                             }
