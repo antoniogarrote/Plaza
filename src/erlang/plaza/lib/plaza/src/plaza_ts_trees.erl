@@ -5,11 +5,20 @@
 % TSTreePosts = [users, comments, blogs]
 % TSTreeComments = [users, posts]
 
+%% TSWrite = [{users,
+%%             [{blogs,
+%%               [{posts,
+%%                 [comments]}
+%%               ]}
+%%              ]},
+%%            others
+%%            ] .
+
 -author("Antonio Garrote Hernandez") .
 
 -include_lib("eunit/include/eunit.hrl").
 
--export([make/1, get/2, path/2, nodes/1]) .
+-export([make/1, get/2, path/2, nodes/1, generate_trees/2, metaresource_path_uri/2, resource_path_uri/2]) .
 
 
 %% @doc
@@ -71,7 +80,7 @@ detect(_Dst, [], _Tree, _Acum) -> error ;
 detect(Dst,[Node | Nodes],Tree, Acum) ->
     case Dst =:= Node of
         true  -> lists:reverse([Node | Acum]) ;
-        false -> case get(lists:reverse([Node | Acum]), Tree) of
+        false -> case plaza_ts_trees:get(lists:reverse([Node]), Tree) of
                      {ok, leaf}  -> detect(Dst, Nodes, Tree, Acum) ;
                      {ok, TreeP} -> case detect(Dst, gb_trees:keys(TreeP), TreeP, [Node | Acum]) of
                                         error  -> detect(Dst, Nodes, Tree, Acum) ;
@@ -80,6 +89,70 @@ detect(Dst,[Node | Nodes],Tree, Acum) ->
                      error       -> error
                  end
     end .
+
+
+metaresource_path_uri(Dst, TSTreeList) ->
+    Path = lists:map(fun(C) -> atom_to_list(C) end, path(Dst, TSTreeList)),
+    {_Last, Result} = lists:foldl(fun(C,{Last, Acum}) ->
+                                          case Last of
+                                              first ->
+                                                  {C, Acum ++ "/" ++ C} ;
+                                              L     ->
+                                                  {C, Acum ++ "/:" ++ L ++ "_id" ++ "/" ++ C}
+                                          end
+                                  end,
+                                  {first, ""},
+                                  Path),
+    Result .
+
+resource_path_uri(Dst, TSTreeList) ->
+    Path = lists:map(fun(C) -> atom_to_list(C) end, path(Dst, TSTreeList)),
+    lists:foldl(fun(C,Acum) ->
+                        Acum  ++ "/" ++ C ++ "/:" ++ C ++ "_id"
+                end,
+                "",
+                Path) .
+
+% TSTreeUsers = [blogs, posts, comments],
+% TSTreeBlogs = [users, {posts, [comments]}]
+% TSTreePosts = [users, comments, blogs]
+% TSTreeComments = [users, posts]
+
+%% TSWrite = [{users,
+%%             [{blogs,
+%%               [{posts,
+%%                 [comments]}
+%%               ]}
+%%              ]}
+%%            ] .
+
+generate_trees(TSWriteTree, Tokens) ->
+    Rs = lists:map(fun(N) -> generate_branches(N,"", [], Tokens) end,
+                   TSWriteTree),
+    lists:foldl(fun(L,Ac) -> Ac ++ L end, [], Rs) .
+
+
+generate_branches({N, Subres}, Prefix, Acum, Tokens) ->
+    Res = atom_to_list(N),
+    {ok, Props} = dict:find(N,Tokens),
+    {metaresource, MetaMod} = proplists:lookup(metaresource,Props),
+    {resource, Mod} = proplists:lookup(resource,Props),
+    Metaresource = Prefix ++ "/" ++ Res,
+    Resource = Metaresource ++ "/:" ++ Res ++ "_id",
+    AcumP = [{Resource, {resource, Mod}} |
+             [ {Metaresource, {resource, MetaMod}} | Acum]],
+    Branches = lists:map(fun(SR) -> generate_branches(SR, Resource, [], Tokens) end,
+                         Subres),
+    lists:foldl(fun(L,Ac) -> Ac ++ L end, [], Branches) ++ AcumP;
+generate_branches(N, Prefix, Acum, Tokens) ->
+    Res = atom_to_list(N),
+    {ok, Props} = dict:find(N,Tokens),
+    {metaresource, MetaMod} = proplists:lookup(metaresource,Props),
+    {resource, Mod} = proplists:lookup(resource,Props),
+    Metaresource = Prefix ++ "/" ++ Res,
+    Resource = Metaresource ++ "/:" ++ Res ++ "_id",
+    [{Resource, {resource, Mod}} |
+     [ {Metaresource, {resource, MetaMod}} | Acum]] .
 
 
 %% Tests
@@ -110,3 +183,28 @@ path_test() ->
                  path(users,TSBlogs)),
     ?assertEqual(error,
                  path(non_existent,TSBlogs)) .
+
+
+
+
+generate_trees_test() ->
+    Dict = dict:from_list([{blogs, [{metaresource, blogs}, {resource, blog}]},
+                           {comments, [{metaresource, comments},{resource, comment}]},
+                           {posts, [{metaresource, posts},{resource, post}]},
+                           {users, [{metaresource, users},{resource, user}]}]),
+    TSWrite = [{users,
+                [{blogs,
+                  [{posts,
+                    [comments]}
+                  ]}
+                ]}
+              ],
+    ?assertEqual([{"/users/:users_id/blogs/:blogs_id/posts/:posts_id/comments/:comments_id",{resource,comment}},
+                  {"/users/:users_id/blogs/:blogs_id/posts/:posts_id/comments",{resource,comments}},
+                  {"/users/:users_id/blogs/:blogs_id/posts/:posts_id",{resource,post}},
+                  {"/users/:users_id/blogs/:blogs_id/posts",{resource,posts}},
+                  {"/users/:users_id/blogs/:blogs_id",{resource,blog}},
+                  {"/users/:users_id/blogs",{resource,blogs}},
+                  {"/users/:users_id",{resource,user}},
+                  {"/users",{resource,users}}],
+                 generate_trees(TSWrite, Dict)) .

@@ -66,9 +66,9 @@ cmd_app_start() ->
 
 
 cmd_console_start() ->
+    error_logger:info_msg("Starting with console...",[]),
     application:start(plaza),
     ParsedArguments = cmd_line_options(default_values(),[app_module, app_name, env]),
-    gen_server:call(plaza_applications_controller, {start_plaza_application, ParsedArguments}),
     console:start_link(ParsedArguments) .
 
 

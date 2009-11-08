@@ -10,6 +10,7 @@
 -export([lifting/6, operation/6, lowering/6]) .
 -export([process_path_pattern/1, resolve_uri/6, parse_accept_header/1, build_default_sparql_query/6, query_sparql_repository/6]) .
 -export([state_update/3, state_get/2, state_new/0, triple_spaces_for_request/6]) .
+-export([pattern_to_delete_in_update/6, triples_to_insert_in_update/6, update_triple_space/6]) .
 
 
 %% public API
@@ -38,9 +39,10 @@ state_new() ->
 %% Default mechanism for transforming a HTTP request into aerror
 %% set of triples.
 lifting('GET', Request, Response, State, Application, Resource) ->
+    error_logger:info_msg("Lifiting resource GET ~p",[Resource]),
     combine('GET', Request, Response, State, Application, Resource,
             [ fun resolve_uri/6,
-              fun triple_spaces_for_request/6
+              fun triple_spaces_for_request/6,
               fun build_default_sparql_query/6 ]) ;
 
 lifting('POST', Request, Response, State, Application, Resource) ->
@@ -51,6 +53,17 @@ lifting('POST', Request, Response, State, Application, Resource) ->
                       fun new_rdf_instance_from_request/6 ]) ;
         false ->
             {error, ["Impossible to process POST request for non metaresource", Resource:uri(), Request#request.parameters]}
+    end ;
+lifting('PUT', Request, Response, State, Application, Resource) ->
+    case Resource:is_metaresource() of
+        true ->
+            {error, ["Impossible to process PUT request for a metaresource", Resource:uri(), Request#request.parameters]} ;
+        false ->
+            combine('PUT', Request, Response, State, Application, Resource,
+                    [ fun resolve_uri/6,
+                      fun triple_spaces_for_request/6,
+                      fun pattern_to_delete_in_update/6,
+                      fun triples_to_insert_in_update/6 ])
     end .
 
 
@@ -65,7 +78,11 @@ operation('GET', Request, Response, State, Application, Resource) ->
 operation('POST', Request, Response, State, Application, Resource) ->
     combine('POST', Request, Response, State, Application, Resource,
             [ fun triple_spaces_for_request/6,
-              fun write_triple_space/6 ]) .
+              fun write_triple_space/6 ]) ;
+
+operation('PUT', Request, Response, State, Application, Resource) ->
+    combine('PUT', Request, Response, State, Application, Resource,
+            [ fun update_triple_space/6 ]) .
 
 
 %% @doc
@@ -75,8 +92,10 @@ lowering('GET', Request, Response, State, Application, Resource) ->
     default_format_response('GET', Request, Response, State, Application, Resource) ;
 
 lowering('POST', Request, Response, State, Application, Resource) ->
-    default_format_response('POST', Request, Response, State, Application, Resource) .
+    default_format_response('POST', Request, Response, State, Application, Resource) ;
 
+lowering('PUT', Request, Response, State, Application, Resource) ->
+    default_format_response('PUT', Request, Response, State, Application, Resource) .
 
 %% Functions
 
@@ -88,14 +107,23 @@ lowering('POST', Request, Response, State, Application, Resource) ->
 %%  - route
 resolve_uri(Method, Request, Response, State, Application, Resource) ->
     Params = Request#request.parameters,
-    Uri    = Resource:uri(),
+    %Uri    = Resource:uri(),
+    Path    = case Resource:is_metaresource() of
+                  true  -> plaza_ts_trees:metaresource_path_uri(Resource:url_token(),
+                                                                plaza_ts_trees:make((Application#plaza_app.application_module):write_tree())) ;
+                  false -> plaza_ts_trees:resource_path_uri(Resource:url_token(),
+                                                            plaza_ts_trees:make((Application#plaza_app.application_module):write_tree()))
+              end,
+    Uri = "http://" ++ (Application#plaza_app.application_module):domain() ++ Path,
+    error_logger:info_msg("Resolving URI: ~p with pattern ~p",[Uri, Params]),
     {Scheme, RestUri} = plaza_utils:strip_protocol_domain(Uri),
     UriParts = process_path_pattern(RestUri),
     case resolve_uri(Params, UriParts, []) of
-        error -> error ;
+        error -> {error, ["Impossible to resolve URI and params", Params, UriParts]} ;
         ResolvedRestUri -> UriP = Scheme ++ lists:foldl(fun(P,Ac) -> Ac ++ "/" ++ P end, "", ResolvedRestUri),
                            {ok, [Method, Request, Response, state_update(route, UriP, State), Application, Resource]}
     end .
+
 
 %% Retrieves a SPARQL query from the State and queries the Resource triple space
 %% using that query. Stores the resulting set of triple spaces in the state.
@@ -122,13 +150,17 @@ query_sparql_repository(Method, Request, Response, State, Application, Resource)
 %%  - sparql_query
 build_default_sparql_query(Method, Request, Response, State, Application, Resource) ->
     Uri = state_get(route, State),
-    Dataset = Resource:triple_space(),
     Parameters = Request#request.parameters,
     Vocabulary = Application#plaza_app.vocabulary,
+    Namespaces = Application#plaza_app.namespaces,
     Contexts = state_get(triple_spaces, State),
-
+    error_logger:info_msg("Inserting datasets clause in sparql query with value ~p",[Contexts]),
     DatasetClause = lists:foldl(fun(C,A) -> A ++ C end, "", [" FROM <" ++ Ctx ++">" || Ctx <- Contexts]),
-    Query = default_sparql_query(Uri, Dataset, Parameters, Vocabulary, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0),
+    error_logger:info_msg("Inserting datasets clause in sparql query with actual value ~p",[DatasetClause]),
+    Query = case Resource:is_metaresource() of
+                true  -> default_metaresource_sparql_query(Uri, DatasetClause, Parameters, Vocabulary, Namespaces, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0) ;
+                false -> default_sparql_query(Uri, DatasetClause, Parameters, Vocabulary, Namespaces, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0)
+            end,
     {ok, [Method, Request, Response, state_update(sparql_query, Query,State), Application, Resource]} .
 
 
@@ -139,10 +171,72 @@ build_default_sparql_query(Method, Request, Response, State, Application, Resour
 %%  - route
 %% @provides
 %%  - rdf_triples
+%%  - new_resource_uri
 new_rdf_instance_from_request(Method, Request, Response, State, Application, Resource) ->
     ResolvedUri = state_get(route,State),
     ResourceUri = Resource:generate_instance_uri(Request, Response, State, Application#plaza_app.vocabulary),
-    Graph = rdf_graph_from_request_params(ResourceUri, ResolvedUri, Request, Application#plaza_app.vocabulary),
+    GraphPre = rdf_graph_from_request_params(ResourceUri, ResolvedUri, Request, Application#plaza_app.vocabulary, Application#plaza_app.namespaces),
+    Graph = case Resource:is_metaresource() of
+                true  -> plaza_triples:set_add(ResourceUri, <<"http://www.w3.org/1999/02/22-rdf-syntax-ns#type">>, plaza_utils:to_binary(Resource:uri()), GraphPre) ;
+                false -> GraphPre
+            end,
+    StateP = state_update(new_resource_uri, ResourceUri, State),
+    {ok, [Method, Request, Response, state_update(rdf_triples, Graph, StateP), Application, Resource]} .
+
+
+%% @doc
+%% Transforms the params of the HTTP request and a provided generated URI into
+%% a set of RDF triples that should be deleted as part of the update operation.
+%% @requires
+%%  - route
+%% @provides
+%%  - pattern_to_delete_in_update
+pattern_to_delete_in_update(Method, Request, Response, State, Application, Resource) ->
+    ResolvedUri = state_get(route,State),
+    Parameters = Request#request.parameters,
+    {Construct, Where} = build_query_update_delete_query(ResolvedUri, Parameters, Application, {"",""}, true, 0),
+    Query = "CONSTRUCT {"++ Construct ++ "} FROM <" ++ ResolvedUri ++ "> WHERE{ " ++ Where ++"}",
+
+    StateP = state_update(pattern_to_delete_in_update, Query, State),
+    {ok, [Method, Request, Response, StateP, Application, Resource]} .
+
+
+%% @doc
+%% Sends an update request to the RDF repository.
+%% @requires
+%%  - route
+%%  - pattern_to_delete_in_update
+%%  - rdf_triples
+%%  - triples_spaces
+update_triple_space(Method, Request, Response, State, Application, Resource) ->
+    BaseUrl = state_get(route, State),
+    QueryDelete = state_get(pattern_to_delete_in_update, State),
+    TriplesUpdate = state_get(rdf_triples, State),
+    ContextsUpdate = state_get(triple_spaces, State),
+    ContextsDelete = [BaseUrl],
+    ParsedTriples = plaza_formaters:format(xml, Application#plaza_app.vocabulary, Application#plaza_app.namespaces, TriplesUpdate),
+    error_logger:info_msg("DELETE QUERY:~n~p~n",[QueryDelete]),
+    error_logger:info_msg("CONTEXTS DELETE:~n~p~n",[ContextsDelete]),
+    error_logger:info_msg("ENCODED TRIPLES:~n~p~n",[ParsedTriples]),
+    error_logger:info_msg("CONTEXTS UPDATE:~n~p~n",[ContextsUpdate]),
+
+    case plaza_repository:update_graph(Application, BaseUrl, QueryDelete, ContextsDelete, ParsedTriples, ContextsUpdate, ?RDF_XML) of
+        ok     -> {ok, [Method, Request, Response#response{ code = 200 }, State, Application, Resource]} ;
+        Other -> {error, ["Impossible to update resource in repository", Other, BaseUrl, Request#request.parameters]}
+    end .
+
+
+%% @doc
+%% Transforms the params of the HTTP request and a provided generated URI into
+%% a set of RDF triples that should be deleted as part of the update operation.
+%% @requires
+%%  - route
+%% @provides
+%%  - rdf_triples
+triples_to_insert_in_update(Method, Request, Response, State, Application, Resource) ->
+    Uri = state_get(route, State),
+    Parameters = lists:filter(fun({_K,V}) -> V =/=  "_delete" end, Request#request.parameters),
+    Graph = do_rdf_graph_params(Uri, [Uri], Parameters, Application#plaza_app.vocabulary, Application#plaza_app.namespaces, plaza_triples:set()),
     {ok, [Method, Request, Response, state_update(rdf_triples, Graph, State), Application, Resource]} .
 
 
@@ -150,18 +244,30 @@ new_rdf_instance_from_request(Method, Request, Response, State, Application, Res
 %% Fixes the triple spaces for a resource and resquest.
 %% @requires
 %%   - route
+%%   - new_resource_uri (if POST)
 %% @provides
 %%   - triple_spaces
 triple_spaces_for_request(Method, Request, Response, State, Application, Resource) ->
     Contexts = case Resource:is_metaresource() of
                    true ->  case Method of
-                                'POST' -> [state_get(route,State), Resource:uri()]
+                                'POST' -> [binary_to_list(state_get(new_resource_uri,State)) |
+                                           lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
+                                                     write_tree_for_resource(state_get(route,State), Resource, Application)) ] ;
+                                'GET'  -> [ state_get(route, State) |
+                                            lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
+                                                      read_tree_for_resource(state_get(route,State), Resource)) ]
                             end ;
                    false -> case Method of
                                 'GET'  -> MetaResource = Resource:metaresource(),
-                                          triple_spaces_for_resource(state_get(route,State), MetaResource)
+                                          [ state_get(route, State) |
+                                            lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
+                                                      read_tree_for_resource(state_get(route,State), MetaResource)) ] ;
+                                'PUT'  -> MetaResource = Resource:metaresource(),
+                                          lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
+                                                    write_tree_for_resource(state_get(route,State), MetaResource, Application))
                             end
                end,
+    error_logger:info_msg("Contexts for resource ~p :~n ~p ~n",[state_get(route,State), Contexts]),
     {ok, [Method, Request, Response, state_update(triple_spaces, Contexts, State), Application, Resource]} .
 
 
@@ -205,24 +311,98 @@ default_format_response(Method, Request, Response, State, Application, Resource)
     {ok, [Method, Request, Response#response{ headers = UpdatedHeaders, body = Body }, State, Application, Resource]} .
 
 
+
 %% private functions
 
 
 
-default_sparql_query(Uri, Dataset, [], _Vocabulary, Query, _First, Num) ->
+
+build_query_update_delete_query(_Subject, [], _Application, Query, _First, _Num) ->
+    Query ;
+build_query_update_delete_query(Subject, [{Key, Value} | Ps], Application, {Construct, Where}, First, Num) ->
+    error_logger:info_msg("QUERY DELETE ~p WITH  ~p args",[Key, length([{Key, Value} | Ps])]),
+    Vocabulary = Application#plaza_app.vocabulary,
+    Namespaces = Application#plaza_app.namespaces,
+
+    case resolve_term_or_ns(Key, Vocabulary, Namespaces) of
+        error ->     build_query_update_delete_query(Subject, Ps, Application, {Construct, Where}, First, Num) ;
+        Prop  ->     [Next] = io_lib:format("~p",[Num]),
+                     ValueP = "?o" ++ Next,
+                     NumP = Num + 1,
+                     PropL = binary_to_list(Prop),
+                     ConstructP = case First of
+                                      true    ->  Construct ++ " <" ++ Subject ++ "> <" ++ PropL ++ "> " ++ ValueP  ;
+                                      false   ->  Construct ++ " . <" ++ Subject ++ "> <" ++ PropL ++ "> " ++ ValueP
+                                  end,
+                     WhereP = case First of
+                                  true  -> Where ++ " <" ++ Subject ++ "> <" ++ PropL ++ "> " ++ ValueP ;
+                                  false -> Where ++ " . <" ++ Subject ++ "> <" ++ PropL ++ "> " ++ ValueP
+                              end,
+                     error_logger:info_msg("RECURING WITH: ~p ~p ~p ~p + args",[Subject, {ConstructP, WhereP}, false, NumP]),
+                     build_query_update_delete_query(Subject, Ps, Application, {ConstructP, WhereP}, false, NumP)
+    end .
+
+
+resolve_term_or_ns(Term,Vocabulary,Namespaces) ->
+    case is_atom(Term) of
+        true  -> plaza_vocabulary:resolve(Vocabulary, Term) ;
+        false -> case lists:member($:,Term) of
+                     true  -> [Ns, Local] = plaza_utils:split(Term, ":"),
+                              list_to_binary([plaza_namespaces:resolve_prefix(Namespaces, plaza_utils:to_atom(Ns)),Local]) ;
+                     false -> plaza_vocabulary:resolve(Vocabulary, Term)
+                 end
+    end .
+
+
+extract_triple_spaces_from_uri(Path, WriteTree) ->
+    RequestPathTokens = plaza_web:process_path_pattern(Path),
+    error_logger:info_msg("Path tokens ~p", [RequestPathTokens]),
+
+    Tree = plaza_ts_trees:make(WriteTree),
+    error_logger:info_msg("Nodes tokens ~p", [plaza_ts_trees:nodes(Tree)]),
+    ResourceTokens = skip_prefix_from_request(RequestPathTokens, plaza_ts_trees:nodes(Tree)),
+    error_logger:info_msg("Resource tokens ~p", [ResourceTokens]),
+    lists:nthtail(1,lists:reverse(lists:foldl(fun(E,[P | Ps]) -> [ P ++ "/" ++ E , P | Ps] end, [[]], ResourceTokens))) .
+
+
+
+skip_prefix_from_request([], _Nodes) -> [] ;
+skip_prefix_from_request([T | Ts], Nodes) ->
+    case lists:any(fun(E) -> E =:= plaza_utils:to_atom(T) end, Nodes) of
+        true  ->  [T | Ts] ;
+        false -> skip_prefix_from_request(Ts, Nodes)
+    end .
+
+
+default_sparql_query(Uri, Dataset, [], _Vocabulary, _Namespaces, Query, _First, Num) ->
     case Num =:= 0 of
-        true  -> "SELECT ?s ?p ?o FROM <" ++ Dataset ++ "> WHERE { ?s ?p ?o FILTER( ?s = <" ++ Uri ++ "> )}" ;
+        true  -> "SELECT ?s ?p ?o " ++ Dataset ++ " WHERE { ?s ?p ?o FILTER( ?s = <" ++ Uri ++ "> )}" ;
         false -> Query ++ "FILTER( ?s = <" ++ Uri ++ ">) }"
     end ;
+default_sparql_query(Uri, Dataset, [{Key, Value} | Ps], Vocabulary, Namespaces, Query, First, Num) ->
+    case resolve_term_or_ns(Key, Vocabulary, Namespaces) of
+        error  ->     default_sparql_query(Uri, Dataset, Ps, Vocabulary, Namespaces, Query, First, Num) ;
+        Prop   ->     QueryP = case First of
+                                   true    ->  Query ++ " ?s " ++ binary_to_list(Prop) ++ " \"" ++ Value ++ "\""  ;
+                                   false   ->  Query ++ " . ?s " ++ binary_to_list(Prop) ++ " \"" ++ Value ++ "\""
+                               end,
+                      default_sparql_query(Uri, Dataset, Ps, Vocabulary, Namespaces, QueryP,false, Num+1)
+    end .
 
-default_sparql_query(Uri, Dataset, [{Key, Value} | Ps], Vocabulary, Query, First, Num) ->
-    case plaza_vocabulary:resolve(Vocabulary, Key) of
-        {ok, Prop } ->     QueryP = case First of
-                                        true    ->  Query ++ " ?s " ++ Prop ++ " \"" ++ Value ++ "\""  ;
-                                        false   ->  Query ++ " . ?s " ++ Prop ++ " \"" ++ Value ++ "\""
-                                    end,
-                           default_sparql_query(Uri, Dataset, Ps, Vocabulary, QueryP,false, Num+1) ;
-        error       ->     default_sparql_query(Uri, Dataset, Ps, Vocabulary, Query, First, Num)
+
+default_metaresource_sparql_query(Uri, Dataset, [], _Vocabulary, _Namespaces, Query, _First, Num) ->
+    case Num =:= 0 of
+        true  -> "SELECT ?s ?p ?o " ++ Dataset ++ " WHERE { ?s ?p ?o. ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <" ++ Uri ++ "> }" ;
+        false -> Query ++  " ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <" ++ Uri ++ "> }"
+    end ;
+default_metaresource_sparql_query(Uri, Dataset, [{Key, Value} | Ps], Vocabulary, Namespaces, Query, First, Num) ->
+    case resolve_term_or_ns(Key, Vocabulary, Namespaces) of
+        error ->     default_metaresource_sparql_query(Uri, Dataset, Ps, Vocabulary, Namespaces, Query, First, Num) ;
+        Prop  ->     QueryP = case First of
+                                  true    ->  Query ++ " ?s " ++ binary_to_list(Prop) ++ " \"" ++ Value ++ "\""  ;
+                                  false   ->  Query ++ " . ?s " ++ binary_to_list(Prop) ++ " \"" ++ Value ++ "\""
+                              end,
+                     default_metaresource_sparql_query(Uri, Dataset, Ps, Vocabulary, Namespaces, QueryP,false, Num+1)
     end .
 
 
@@ -241,8 +421,12 @@ do_combine(Params, []) -> {ok, Params} ;
 do_combine(Params, [F | Fs]) ->
     case apply(F,Params) of
         {ok, ParamsP}   -> do_combine(ParamsP, Fs) ;
-        {error, Reason} -> {error, Reason}
+        {error, Reason} -> {error, Reason} ;
+        Other           -> error_logger:error_msg("Unknown response combining function: ~p, ~p, ~p",[F, Params, Other]),
+                           {error, ["Unkown response", Other]}
+
     end .
+
 
 %% do_combine(Params, [F | Fs]) ->
 %%     try apply(F,Params) of
@@ -257,7 +441,10 @@ do_combine(Params, [F | Fs]) ->
 %% list of pattern tokens.
 process_path_pattern(Pattern) ->
     Elements = plaza_utils:split(Pattern, "/"),
-    HasDot = lists:member($.,lists:nth(1,lists:reverse(Elements))),
+    HasDot = case Elements of
+                 []     -> false ;
+                 _Other -> lists:member($.,lists:nth(1,lists:reverse(Elements)))
+             end,
     ElementsP = if
                     HasDot =:= true ->
                         [ToSplit | Rest] = lists:reverse(Elements),
@@ -303,16 +490,17 @@ parse_formats(AcceptHeader) ->
     lists:map(fun([F,S]) -> {F,S} end, Ls) .
 
 
-rdf_graph_from_request_params(Subject, Dataset, Request,Vocabulary) ->
+rdf_graph_from_request_params(Subject, Dataset, Request, Vocabulary, Namespaces) ->
     Params = Request#request.parameters,
-    do_rdf_graph_params(Subject, Dataset, Params, Vocabulary, plaza_triples:set()) .
+    do_rdf_graph_params(Subject, Dataset, Params, Vocabulary, Namespaces, plaza_triples:set()) .
 
-do_rdf_graph_params(_Subject, _Dataset, [], _Vocabulary, Set) ->
+do_rdf_graph_params(_Subject, _Dataset, [], _Vocabulary, _Namespaces, Set) ->
     Set ;
-do_rdf_graph_params(Subject, Dataset, [{P,V}| Params], Vocabulary, Set) ->
-    case plaza_vocabulary:resolve(Vocabulary, P) of
-        error     -> do_rdf_graph_params(Subject, Dataset, Params, Vocabulary, Set) ;
-        Predicate -> do_rdf_graph_params(Subject, Dataset, Params, Vocabulary, plaza_triples:set_add(Subject, Predicate, plaza_triples:l(V,undefined,undefined), Dataset, Set))
+do_rdf_graph_params(Subject, Dataset, [{P,V}| Params], Vocabulary, Namespaces, Set) ->
+    case resolve_term_or_ns(P, Vocabulary, Namespaces) of
+        error     -> do_rdf_graph_params(Subject, Dataset, Params, Vocabulary, Namespaces, Set) ;
+        Predicate -> do_rdf_graph_params(Subject, Dataset, Params, Vocabulary, Namespaces,
+                                         plaza_triples:set_add(Subject, Predicate, plaza_triples:l(V,undefined,undefined), Dataset, Set))
     end .
 
 
@@ -321,15 +509,31 @@ do_rdf_graph_params(Subject, Dataset, [{P,V}| Params], Vocabulary, Set) ->
 %% a certain resource.
 %% The Uri of the resource and the associated meta resource
 %% must be provided as arguments.
-triple_spaces_for_resource(Uri, MetaResource) ->
-    [Uri [ MetaResource:uri() | [ R:uri() || R <- MetaResource:resources_tree()]] .
+read_tree_for_resource(_Uri, MetaResource) ->
+    Tree = plaza_ts_trees:make(MetaResource:read_tree()),
+    Nodes = plaza_ts_trees:nodes(Tree),
+    [ R:uri() || R <- Nodes] .
 
 
 %% @doc
 %% Computes the triple spaces for a meta resource based in its
 %% associated resource's tree.
-triple_spaces_for_metaresource(MetaResource) ->
-    [ MetaResource:uri() | [ R:uri() || R <- MetaResource:resources_tree()] .
+read_tree_for_metaresource(MetaResource) ->
+    Tree = plaza_ts_trees:make(MetaResource:read_tree()),
+    Nodes = plaza_ts_trees:nodes(Tree),
+    [ R:uri() || R <- Nodes].
+
+
+write_tree_for_resource(Uri, _MetaResource, Application) ->
+    extract_triple_spaces_from_uri(Uri, (Application#plaza_app.application_module):write_tree()) .
+%%     Tree = plaza_ts_trees:make((Application#plaza_app.application_module):write_tree()),
+%%     Path = plaza_ts_trees:path(MetaResource, Tree),
+%%     [Uri | Path] .
+
+write_tree_for_metaresource(Uri, _MetaResource, Application) ->
+    extract_triple_spaces_from_uri(Uri, (Application#plaza_app.application_module):write_tree()) .
+%%     Tree = plaza_ts_trees:make((Application#plaza_app.application_module):write_tree()),
+%%     plaza_ts_trees:path(MetaResource, Tree) .
 
 
 %% Tests
@@ -358,3 +562,13 @@ resolve_uri_test() ->
               ResolvedRestUri -> "http://test.com" ++ lists:foldl(fun(P,Ac) -> Ac ++ "/" ++ P end, "", ResolvedRestUri)
           end,
     ?assertEqual("http://test.com/this/value/45/txt", Res) .
+
+
+resolve_term_or_ns_test() ->
+    Vocabulary = plaza_vocabulary:make([{test, <<"http://test.com/test">>}]),
+    Ns = plaza_namespaces:make([{dc, <<"http://purl.dc.org#">>},
+                                {test, <<"http://test.com#">>}]),
+    ?assertEqual(<<"http://test.com#something">>,
+                 resolve_term_or_ns("test:something", Vocabulary, Ns)),
+    ?assertEqual(<<"http://test.com/test">>,
+                 resolve_term_or_ns(test,Vocabulary,Ns)).

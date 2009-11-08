@@ -12,7 +12,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([proplist_find/2, select_environment/2, to_binary/1, split/2, strip_protocol/1, strip_protocol_domain/1]) .
--export([to_atom/1, dict_find/2, subbitstring/2]) .
+-export([to_atom/1, dict_find/2, subbitstring/2, merge_dicts/2]) .
 
 
 %% Public API
@@ -74,6 +74,15 @@ strip_protocol_domain(Uri) ->
     {Protocol ++ "://" ++ Domain, lists:foldl(fun(Part,Acum) -> Acum ++ "/" ++ Part end, "", Rest)} .
 
 
+merge_dicts(DictPrevalent, Dict) ->
+    Keys = dict:fetch_keys(DictPrevalent),
+    do_merge_dicts(Keys, DictPrevalent, Dict) .
+do_merge_dicts([], _Dict, Merged) ->
+    Merged ;
+do_merge_dicts([K | Ks], Dict, Merged) ->
+    {ok, Value} = dict:find(K, Dict),
+    do_merge_dicts(Ks, Dict, dict:store(K, Value, Merged)) .
+
 %% Tests
 
 subbitstring_test() ->
@@ -108,7 +117,7 @@ dict_find_test() ->
     ?assertEqual(none, dict_find(c, Dict)) .
 
 select_environment_test() ->
-    Data = [{development, [{a, "a"}]}, 
+    Data = [{development, [{a, "a"}]},
             {production,  [{b, "b"}]}],
     ?assertEqual("a", proplist_find(a, select_environment(development, Data))) .
 

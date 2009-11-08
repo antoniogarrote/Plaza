@@ -10,6 +10,8 @@
 
 -behaviour(gen_server) .
 
+-include_lib("definitions.hrl").
+
 -export([start_link/1]) .
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 -export([repository_connect/0, repository_add_encoded_triples/3, repository_sparql_query/1, repository_full_graph/0]) .
@@ -47,10 +49,12 @@ repository_full_graph() ->
 
 
 init([ApplicationOptions]) ->
+    error_logger:info_msg("Console process starting",[]),
     Result = plaza_applications_controller:start_plaza_application(ApplicationOptions),
+    error_logger:info_msg("Console process 1",[]),
     case Result of
-        ok              -> ok ;
-        {error, Reason} -> erlang:error("Impossible to start the console for application: " ++ Reason, ApplicationOptions)
+        {error, Reason} -> erlang:error("Impossible to start the console for application: " ++ Reason, ApplicationOptions) ;
+        Other           -> error_logger:info_msg("Console process started: ~p",[Other])
     end,
     ApplicationName = list_to_atom(plaza_utils:proplist_find(name,ApplicationOptions)),
     Config = plaza_application_proxy:get_configuration(ApplicationName),

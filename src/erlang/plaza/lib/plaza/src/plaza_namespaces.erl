@@ -109,6 +109,7 @@ do_update_triples([{S,U,O,C} | Us], Ns, Triples, Nsp) ->
     case with_namespace(Ns, U) of
         {FoundNs, Updated} ->
             case lists:any(fun(ANs) ->
+                                   error_logger:info_msg("COMPARING: ~p vs ~p ? ~p",[FoundNs, ANs, (FoundNs =:= ANs)]),
                                    FoundNs =:= ANs
                            end,
                            Nsp) of

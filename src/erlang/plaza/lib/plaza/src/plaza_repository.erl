@@ -12,7 +12,7 @@
 -include_lib("eunit/include/eunit.hrl") .
 -include_lib("states.hrl") .
 
--export([connect/1, add_encoded_triples/4, add_encoded_triples/5, sparql_query/2, delete_graph/2]) .
+-export([connect/1, add_encoded_triples/4, add_encoded_triples/5, sparql_query/2, delete_graph/2, update_graph/7]) .
 
 
 %% Some definitions of the messages exchanged with the
@@ -20,6 +20,7 @@
 -define(REPOSITORY_JAVA_MBOX, triples_repository) .
 -define(CONNECT_MESSAGE, connect) .
 -define(ADD_ENCODED_TRIPLES_MESSAGE, add_triples) .
+-define(UPDATE_GRAPH, update_graph) .
 -define(DELETE_GRAPH_MESSAGE, delete_graph) .
 -define(QUERY_MESSAGE, 'query') .
 
@@ -42,6 +43,7 @@ add_encoded_triples(Config, BaseUrl, Triples, Format) ->
     add_encoded_triples(Config, BaseUrl, Triples, [BaseUrl], Format) .
 
 add_encoded_triples(Config, BaseUrl, Triples, Contexts, Format) ->
+    error_logger:info_msg("Requesting add triples to repository: ~n Triple: ~p, ~n Contexts: ~p",[Triples, Contexts]),
     Opts = retrieve_repository_options(Config),
     Node = plaza_utils:proplist_find(node, Opts),
     {?REPOSITORY_JAVA_MBOX, Node} ! {self(), ?ADD_ENCODED_TRIPLES_MESSAGE, [{base, BaseUrl},
@@ -53,6 +55,22 @@ add_encoded_triples(Config, BaseUrl, Triples, Contexts, Format) ->
         Error  -> erlang:error("Impossible to add triples to the repository:", [Error, Config, BaseUrl, Triples, Format])
     end .
 
+
+update_graph(Config, BaseUrl, UpdateQuery, ContextsDelete, TriplesToInsert, ContextsInsertion, Format) ->
+    error_logger:info_msg("Requesting updating triples to repository: ~n Query Delete: ~p ~n Triples Update: ~p ~n Contexts Delete: ~p ~n Contexts Update ~p",
+                          [UpdateQuery, TriplesToInsert, ContextsDelete, ContextsInsertion]),
+    Opts = retrieve_repository_options(Config),
+    Node = plaza_utils:proplist_find(node, Opts),
+    {?REPOSITORY_JAVA_MBOX, Node} ! {self(), ?UPDATE_GRAPH, [{base, BaseUrl},
+                                                             {update_query, UpdateQuery},
+                                                             {contexts_delete, ContextsDelete},
+                                                             {triples, TriplesToInsert},
+                                                             {contexts_insert, ContextsInsertion},
+                                                             {format, Format}]},
+    receive
+        ok     -> ok ;
+        Error  -> erlang:error("Impossible to update triples to the repository:", [Error, Config, BaseUrl, UpdateQuery, ContextsDelete, TriplesToInsert, ContextsInsertion])
+    end .
 
 sparql_query(Config, Query) ->
     Opts = retrieve_repository_options(Config),

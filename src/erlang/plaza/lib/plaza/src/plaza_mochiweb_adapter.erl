@@ -14,7 +14,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("http_records.hrl").
 
--export([start_link/2, update_routes/3, loop/3, handle_request/2, header/2]) .
+-export([start_link/2, update_routes/3, loop/3, handle_request/3, header/2]) .
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 
@@ -33,8 +33,10 @@ update_routes(Name, Routes, Application) ->
 
 
 init({Name,Options}) ->
+    {ok, CurrentDir} = file:get_cwd(),
+    error_logger:info_msg("Starting mochiweb adapter with DOCROOT ~p and options ~p", [CurrentDir ++ "/www", Options]),
     Loop = fun (Req) ->
-		   ?MODULE:loop(Name,Req, none)
+		   ?MODULE:loop(Name,Req, CurrentDir ++ "/www")
 	   end,
     Params = [{name, ?MODULE}, {loop, Loop} | Options],
     mochiweb_http:start(Params),
@@ -48,13 +50,13 @@ handle_call({update_routes, NewRoutes, Application}, _From, Routes) ->
                                         Application }
                               end,
                               NewRoutes),
-    {reply, ok, Routes ++ UpdatedRoutes } .
+    {reply, ok, Routes ++ UpdatedRoutes} .
 
 
-handle_cast({handle_request, Request}, Routes) ->
+handle_cast({handle_request, Request, DocRoot}, Routes) ->
     spawn(?MODULE,
           handle_request,
-          [Request, Routes]),
+          [Request, Routes, DocRoot]),
     {noreply, Routes} .
 
 
@@ -77,11 +79,11 @@ terminate(shutdown, _State) ->
 
 %% @doc
 %% Handles a mochiweb incoming request
-handle_request(Request, Routes) ->
+handle_request(Request, Routes, DocRoot) ->
     error_logger:info_msg("received web request: ~p", [Request]),
     PlazaRequest = make_request(Request),
     error_logger:info_msg("routing: ~p", [Request]),
-    Response = route(PlazaRequest, Routes),
+    Response = route(PlazaRequest, Routes, DocRoot),
     do_response(Response,Request) .
 
 
@@ -114,11 +116,11 @@ match_path([Pattern|Patterns], [Path|Paths], Request) ->
 %% Provided a set of routes and a plaza request,
 %% return {ok, action()} if any route matches or
 %% error in any other case.
-route(Request, Routes) ->
+route(Request, Routes, DocRoot) ->
     RequestPathTokens = plaza_web:process_path_pattern(Request#request.path),
     error_logger:info_msg("routing: ~p in ~p", [RequestPathTokens, lists:map(fun({R,P,_A}) -> {R,P} end, Routes)]),
     State = plaza_web:state_new(),
-    case do_route(RequestPathTokens, Routes,Request) of
+    case do_route(RequestPathTokens, Routes, Request) of
         {ok, {resource,R}, RequestP, ApplicationP} -> error_logger:info_msg("routing success, routing to resource: ~p", [R]),
                                                       process_resource(R, RequestP, #response{}, State, ApplicationP) ;
         {ok, {M,F}, RequestP, ApplicationP}        -> error_logger:info_msg("routing success, routing to: ~p", [{M,F}]),
@@ -126,11 +128,26 @@ route(Request, Routes) ->
         {ok, F, RequestP, ApplicationP}            -> error_logger:info_msg("routing success, routing to: ~p", [F]),
                                                       F(RequestP, #response{}, State, ApplicationP) ;
         {error, _RequestP}                         -> error_logger:info_msg("routing error", []),
-                                                      #response{ code = 404,
-                                                                 headers = [{"Content-Type", "text/plain"},
-                                                                            {"Charset", "utf-8"}],
-                                                                 body = "\"Unknown resource\"" }
+                                                      check_static_file(DocRoot, Request#request.path)
     end.
+
+check_static_file(DocRoot, Path) ->
+    File = case Path == [] of
+               true  -> DocRoot ++ Path ++ "/index.html" ;
+               false -> case lists:nth(1,lists:reverse(Path)) == $/ of
+                            true  -> DocRoot ++ Path ++ "index.html" ;
+                            false -> DocRoot ++ Path
+                        end
+           end ,
+    error_logger:info_msg("Trying to serve static file ~p",[File]),
+    case file:read_file_info(File) of
+        {ok, _Info}  -> {static, DocRoot, Path} ;
+        _Error       -> #response{ code = 404,
+                                   headers = [{"Content-Type", "text/plain"},
+                                              {"Charset", "utf-8"}],
+                                   body = "\"Unknown resource\"" }
+    end .
+
 
 
 %% @doc
@@ -143,6 +160,7 @@ do_processing_resource([], _Resource, _Request, Response, _State, _Application) 
     Response ;
 do_processing_resource([S | Stages], Resource, Request, Response, State, Application) ->
     Method = Request#request.method,
+    error_logger:info_msg("Processing resource: ~p, ~p, ~p",[Resource, S, Method]),
     case apply(Resource, S, [Method, Request, Response, State, Application]) of
         {ok, [_M, _R, ResponseP, StateP, _A, _Res]} -> do_processing_resource(Stages, Resource, Request, ResponseP, StateP, Application) ;
         {error, Reason}                             -> error_logger:info_msg("Error processing resource", [Resource, Reason]),
@@ -153,10 +171,9 @@ do_processing_resource([S | Stages], Resource, Request, Response, State, Applica
     end .
 
 
-
-do_route(_Path, [], Request) ->
-    error_logger:info_msg("Routing returning error",[]),
-    {error, Request} ;
+do_route(Path, [], _Request) ->
+    error_logger:info_msg("Named route not found: ~p",[Path]),
+    {error, route_not_found} ;
 do_route(Path, [{Pattern, Action, Application} | Routes], Request) ->
     error_logger:info_msg("Routing try:~p <-> ~p",[Pattern, Path]),
     case match_path(Pattern, Path, Request) of
@@ -169,8 +186,12 @@ do_route(Path, [{Pattern, Action, Application} | Routes], Request) ->
     end .
 
 
-loop(Name, Req, _DocRoot) ->
-    gen_server:cast(Name, {handle_request, Req}) .
+%% route_tokens(Path, Tokens, Request) ->
+%%     error_logger:info_msg("Routing with tokens ~p", [Tokens]),
+
+
+loop(Name, Req, DocRoot) ->
+    gen_server:cast(Name, {handle_request, Req, DocRoot}) .
 
 
 %% @doc
@@ -198,9 +219,19 @@ header(Req,Key) ->
 %% Composes a mochiweb response from plaza response record.
 do_response(Response, Request) ->
     error_logger:info_msg("Sending back response: ~p", [Response]),
-    Request:respond({Response#response.code,
-                     Response#response.headers,
-                     Response#response.body}) .
+    case Response of
+        {static, DocRoot, Path}  ->  PathP = case Path == [] of
+                                                 true  -> "/index.html" ;
+                                                 false -> case lists:nth(1,lists:reverse(Path)) == $/ of
+                                                              true  -> Path ++ "index.html" ;
+                                                              false -> Path
+                                                          end
+                                             end ,
+                                     Request:serve_file(lists:nthtail(1,PathP), DocRoot) ;
+        Resp                     ->  Request:respond({Resp#response.code,
+                                                      Resp#response.headers,
+                                                      Resp#response.body})
+    end .
 
 
 %% Tests

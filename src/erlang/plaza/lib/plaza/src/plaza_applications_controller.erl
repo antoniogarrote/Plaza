@@ -34,15 +34,21 @@ start_plaza_application(Options) ->
 
 init(_State) ->
     %% seed the random number generator
-    {ok, #app_controller{} }.
+    {ok, #app_controller{ } } .
 
 
 handle_call({start_plaza_application, Options}, _From, #app_controller{ apps=Apps } = State) ->
+    error_logger:info_msg("Plaza application controller, starting plaza_application",[]),
     {NewState, Result} = case proplists:lookup(name,Options) of
+
                              none         -> {State, {error, "no name for application to start"}} ;
-                             {name, Name} -> Pid = plaza_application_proxy:start_link(Options),
+
+                             {name, Name} -> error_logger:info_msg("Plaza application controller, application_proxy:start_link",[]),
+                                             Pid = plaza_application_proxy:start_link(Options),
+                                             error_logger:info_msg("Plaza application controller, result ~p",[Pid]),
                                              {State#app_controller{ apps=[{list_to_atom(Name), Pid} | Apps] }, ok}
                          end,
+    error_logger:info_msg("Plaza application started by controller",[]),
     {reply, Result, NewState} .
 
 

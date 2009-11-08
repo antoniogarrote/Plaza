@@ -72,6 +72,42 @@ public class RepositoryNode {
         }
     }
 
+    private static void doUpdate(OtpErlangPid from, OtpErlangTuple msg, Adapter repository, OtpMbox mbox) {
+        try{
+            OtpErlangList propList = (OtpErlangList) msg.elementAt(2);
+            HashMap<String, Object> map = OtpMapperUtils.otpStringObjPropsList(propList);
+            String updateQuery = (String) map.get("update_query");
+            OtpErlangList ctxsDelete = (OtpErlangList) map.get("contexts_delete");
+            OtpErlangList ctxsInsert = (OtpErlangList) map.get("contexts_insert");
+            String base = (String) map.get("base");
+            String triples = (String) map.get("triples");
+            String format = (String) map.get("format");
+
+
+            String[] contextUrisDelete = new String[ctxsDelete.arity()];
+            for(int i=0; i<ctxsDelete.arity(); i++) {
+                contextUrisDelete[i] = ((OtpErlangString) ctxsDelete.elementAt(i)).stringValue();
+            }
+
+            String[] contextUrisInsert = new String[ctxsInsert.arity()];
+            for(int i=0; i<ctxsInsert.arity(); i++) {
+                contextUrisInsert[i] = ((OtpErlangString) ctxsInsert.elementAt(i)).stringValue();
+            }
+
+            repository.updateTriples(base, updateQuery, triples, contextUrisDelete, contextUrisInsert, format);
+
+            mbox.send(from, new OtpErlangAtom("ok"));
+
+        } catch (Exception ex) {
+            ex.printStackTrace();
+            OtpErlangObject[] reply = new OtpErlangObject[2];
+            reply[0] = new OtpErlangAtom("error");
+            reply[1] = new OtpErlangString(ex.getMessage());
+
+            mbox.send(from, new OtpErlangTuple(reply));
+        }
+    }
+
     private static void doQuery(OtpErlangPid from, OtpErlangTuple msg, Adapter repository, OtpMbox mbox) {
         try{
             OtpErlangList propList = (OtpErlangList) msg.elementAt(2);
@@ -156,7 +192,9 @@ public class RepositoryNode {
                                 RepositoryNode.doQuery(from,msg,repository, _mbox);
                             } else if(operation.equalsIgnoreCase(Adapter.DELETE_GRAPH)) {
                                 RepositoryNode.doDeleteGraph(from,msg,repository, _mbox);
-                            } else {
+                            } else if(operation.equalsIgnoreCase(Adapter.UPDATE_GRAPH)) {
+                                RepositoryNode.doUpdate(from,msg,repository, _mbox);
+                            }else {
                                 // not implemented yet
                             }
                         }

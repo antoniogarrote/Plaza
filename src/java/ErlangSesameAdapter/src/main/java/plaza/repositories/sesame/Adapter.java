@@ -12,11 +12,16 @@ import com.ericsson.otp.erlang.OtpErlangTuple;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import org.openrdf.model.Resource;
+import org.openrdf.model.Statement;
 import org.openrdf.model.impl.URIImpl;
 import org.openrdf.query.BindingSet;
+import org.openrdf.query.GraphQuery;
+import org.openrdf.query.GraphQueryResult;
 import org.openrdf.repository.Repository;
 import org.openrdf.repository.RepositoryConnection;
 import org.openrdf.rio.RDFFormat;
@@ -173,6 +178,45 @@ public class Adapter implements plaza.repositories.interfaces.Adapter {
         try {
             con.clear(new URIImpl(graphUri));
         }finally {
+            con.close();
+        }
+    }
+
+    public void updateTriples(String baseUri, String triplesToDeleteQuery, String triplesToAdd, String[] contextsToDelete, String[] contextsToInsert, String format) throws Exception {
+        // This starts a transaction
+        RepositoryConnection con = repository.getConnection();
+        try {
+
+            // First we remove the delete query graph
+            GraphQuery tupleQuery = con.prepareGraphQuery(QueryLanguage.SPARQL, triplesToDeleteQuery);
+            GraphQueryResult result = tupleQuery.evaluate();
+
+            org.openrdf.model.Resource[] contextsDeleteRes = new Resource[contextsToDelete.length] ;
+            for(int i=0; i<contextsToDelete.length; i++) {
+                contextsDeleteRes[i] = new URIImpl(contextsToDelete[i]);
+            }
+
+            con.remove(result, contextsDeleteRes);
+            result.close();
+
+            // Then we insert the new triples
+            org.openrdf.model.Resource[] contextsInsertRes = new Resource[contextsToInsert.length] ;
+            for(int i=0; i<contextsInsertRes.length; i++) {
+                contextsInsertRes[i] = new URIImpl(contextsToInsert[i]);
+            }
+
+
+            if (format.equalsIgnoreCase(RDFXML)) {
+                con.add(new ByteArrayInputStream(triplesToAdd.getBytes()), baseUri, RDFFormat.RDFXML,contextsInsertRes);
+            } else if(format.equalsIgnoreCase(N3)) {
+                con.add(new ByteArrayInputStream(triplesToAdd.getBytes()), baseUri, RDFFormat.N3, contextsInsertRes);
+            } else if(format.equalsIgnoreCase(TURTLE)) {
+                con.add(new ByteArrayInputStream(triplesToAdd.getBytes()), baseUri, RDFFormat.TURTLE, contextsInsertRes);
+            } else {
+                throw new Exception("Unsupported format " + format);
+            }
+        }finally {
+            // End of the transaction
             con.close();
         }
     }

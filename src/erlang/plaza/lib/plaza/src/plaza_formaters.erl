@@ -41,7 +41,9 @@ rdf_formatter(xml, Triples, Ns) ->
                         end,
                         UpdatedTriples),
     NsBytes = lists:foldl(fun(N,Acum) -> [ <<"xmlns:">>, plaza_utils:to_binary(N) , <<"=\"">>, plaza_namespaces:resolve_prefix(Ns,N), <<"\" ">> ] ++ Acum end,
-                          [],UsedNs),
+                          [],
+                         lists:filter(fun(UNs) -> UNs =/= rdf end, UsedNs)),
+    %Preamble = [<<"<?xml version=\"1.0\" encoding=\"utf-8\"?><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" ">>| NsBytes] ++ [ <<">">>],
     Preamble = [<<"<?xml version=\"1.0\" encoding=\"utf-8\"?><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" ">>| NsBytes] ++ [ <<">">>],
     Conclusion = <<"</rdf:RDF>">>,
     list_to_bitstring([[Preamble | Stances],Conclusion]) .

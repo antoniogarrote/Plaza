@@ -5,6 +5,7 @@
 -include_lib("../plaza/lib/plaza/src/http_records.hrl").
 
 -export([repository_module/0, vocabulary_module/0, server_configuration/0, routes/0, domain/0]) .
+-export([write_tree/0, resources/0]) .
 -export([expose_request/4]) .
 
 
@@ -21,10 +22,16 @@ server_configuration() ->
 domain() ->
     "localhost:7777" .
 
+write_tree() -> [blogs] .
+
+
 routes() ->
-    [{"/expose",    {demo_application, expose_request}},
-     {"/Blogs/:id", {resource, blog_resource}},
-     {"/Blogs",     {resource, blogs_resource}} ] .
+    [{"/expose",    {demo_application, expose_request}} ] .
+%%      {"/Blogs/:id", {resource, blog_resource}},
+%%      {"/Blogs",     {resource, blogs_resource}} ] .
+
+
+resources() -> [blogs_resource, blog_resource] .
 
 
 %% handlers

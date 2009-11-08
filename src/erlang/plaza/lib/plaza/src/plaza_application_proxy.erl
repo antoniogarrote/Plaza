@@ -42,9 +42,9 @@ init(Options) ->
                  error  -> {stop, "Unable to start web server"} ;
                  _Id    -> Routes = ProxyState#plaza_app.routes,
                            plaza_mochiweb_adapter:update_routes(ServerName, Routes, ProxyState),
-                           {ok, ProxyState#plaza_app{ webserver = ServerName }}
-             end,
-    Result  .
+                           {ok, ProxyState}
+    end,
+    Result .
 
 
 handle_call(get_configuration, _From, State) ->
@@ -72,21 +72,23 @@ terminate(shutdown, _State) ->
 
 
 make_initial_state(Options) ->
-    AppModule   = list_to_atom(plaza_utils:proplist_find(app,Options)),
-    RepoModule  = apply(AppModule, repository_module, []),
+    AppModule = list_to_atom(plaza_utils:proplist_find(app,Options)),
+    RepoModule = apply(AppModule, repository_module, []),
     VocabularyModule = apply(AppModule, vocabulary_module, []),
     Environment = case plaza_utils:proplist_find(env,Options) of
                       none -> development ;
                       Env  -> list_to_atom(Env)
                   end,
     ServerOptions = apply(AppModule, server_configuration, []),
-    Routes = apply(AppModule, routes, []),
+    Tokens = collect_resources(apply(AppModule, resources, [])),
+    Routes = apply(AppModule, routes, []) ++ plaza_ts_trees:generate_trees(AppModule:write_tree(), Tokens),
     #plaza_app{name =  list_to_atom(plaza_utils:proplist_find(name,Options)),
                application_module = AppModule,
                repository_module = RepoModule,
                server_options = ServerOptions,
                routes = Routes,
                environment = Environment,
+               url_tokens = Tokens,
                namespaces = plaza_namespaces:merge([plaza_core_ontology:namespaces(),
                                                     plaza_namespaces:make(apply(VocabularyModule, namespaces,[]))]),
                vocabulary = compile_vocabulary([plaza_core_ontology:vocabulary() |
@@ -96,3 +98,16 @@ make_initial_state(Options) ->
 
 compile_vocabulary(Vocabularies) ->
     plaza_vocabulary:merge(Vocabularies) .
+
+collect_resources(Resources) ->
+    collect_resources(Resources,dict:new()) .
+
+collect_resources([], Acum) ->
+    Acum ;
+collect_resources([R | Rs], Acum) ->
+    Token = R:url_token(),
+    AcumP = case R:is_metaresource() of
+                true  -> dict:append(Token, {metaresource, R}, Acum) ;
+                false -> dict:append(Token, {resource, R}, Acum)
+            end,
+    collect_resources(Rs,AcumP) .
