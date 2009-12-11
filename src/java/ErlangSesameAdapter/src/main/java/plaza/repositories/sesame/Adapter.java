@@ -30,6 +30,7 @@ import org.openrdf.repository.sail.SailRepository;
 import org.openrdf.query.QueryLanguage;
 import org.openrdf.query.TupleQuery;
 import org.openrdf.query.TupleQueryResult;
+import org.openrdf.repository.RepositoryResult;
 
 
 /**
@@ -173,9 +174,19 @@ public class Adapter implements plaza.repositories.interfaces.Adapter {
         }
     }
 
-    public void delete(String graphUri) throws Exception {
+    public void delete(String graphUri, String[] contexts) throws Exception {
         RepositoryConnection con = repository.getConnection();
         try {
+
+            RepositoryResult<Statement> sts = con.getStatements(null, null, null, false, new URIImpl(graphUri));
+
+
+            org.openrdf.model.Resource[] contextsDeleteRes = new Resource[contexts.length] ;
+            for(int i=0; i<contexts.length; i++) {
+                contextsDeleteRes[i] = new URIImpl(contexts[i]);
+            }
+
+            con.remove(sts, contextsDeleteRes);
             con.clear(new URIImpl(graphUri));
         }finally {
             con.close();

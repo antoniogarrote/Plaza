@@ -42,7 +42,7 @@ handle_call({start_web_server, Options}, _From, Servers) ->
     {Result, NewState} = case lists:member(Identifier, Servers) of
                               false  -> plaza_mochiweb_adapter:start_link(Identifier,Options),
                                         {Identifier, [Identifier | Servers]} ;
-                              true   -> {error, Servers}
+                              true   -> {Identifier, Servers}
                           end,
     {reply, Result, NewState} .
 

@@ -35,6 +35,7 @@ get_configuration(ApplicationName) ->
 
 init(Options) ->
     ProxyState = make_initial_state(Options),
+    create_queues(ProxyState),
     plaza_repository:connect(ProxyState),
     ServerOptions = ProxyState#plaza_app.server_options,
     ServerName = plaza_webservers_controller:start_server(ServerOptions),
@@ -71,6 +72,20 @@ terminate(shutdown, _State) ->
 %% Private methods
 
 
+create_queues(State) ->
+    AppModule = State#plaza_app.application_module,
+    Resources = lists:filter(fun(R) ->
+                                  R:is_metaresource()
+                             end,
+                             apply(AppModule, resources, [])),
+    BinarizedResources = lists:map(fun(R) -> plaza_utils:to_binary(R) end, Resources),
+    error_logger:info_msg("Creating queues for resources ~p",[BinarizedResources]),
+    lists:foreach(fun(R) ->
+                          plaza_rabbit_backend:create_queue(R, R)
+                  end,
+                  BinarizedResources),
+    BinarizedResources.
+
 make_initial_state(Options) ->
     AppModule = list_to_atom(plaza_utils:proplist_find(app,Options)),
     RepoModule = apply(AppModule, repository_module, []),
@@ -86,6 +101,7 @@ make_initial_state(Options) ->
                application_module = AppModule,
                repository_module = RepoModule,
                server_options = ServerOptions,
+               write_tree = plaza_ts_trees:make(AppModule:write_tree()),
                routes = Routes,
                environment = Environment,
                url_tokens = Tokens,

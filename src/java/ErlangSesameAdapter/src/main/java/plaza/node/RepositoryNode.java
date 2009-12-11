@@ -134,10 +134,17 @@ public class RepositoryNode {
     private static void doDeleteGraph(OtpErlangPid from, OtpErlangTuple msg, Adapter repository, OtpMbox mbox) {
         try{
             OtpErlangList propList = (OtpErlangList) msg.elementAt(2);
-            HashMap<String, String> map = OtpMapperUtils.otpStringPropsList(propList);
+            HashMap<String, Object> map = OtpMapperUtils.otpStringObjPropsList(propList);
             
-            String graphName = map.get("graph");
-            repository.delete(graphName);
+            String graphName = (String) map.get("graph");
+            OtpErlangList ctxsDelete = (OtpErlangList) map.get("contexts_delete");
+
+            String[] contextUrisDelete = new String[ctxsDelete.arity()];
+            for(int i=0; i<ctxsDelete.arity(); i++) {
+                contextUrisDelete[i] = ((OtpErlangString) ctxsDelete.elementAt(i)).stringValue();
+            }
+
+            repository.delete(graphName,contextUrisDelete);
 
             OtpErlangObject[] reply = new OtpErlangObject[2];
             reply[0] = new OtpErlangAtom("ok");

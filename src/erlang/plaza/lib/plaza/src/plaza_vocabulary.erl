@@ -35,6 +35,7 @@ resolve(Vocabulary, Term) when is_list(Term) ->
     resolve(Vocabulary, list_to_atom(Term)) ;
 
 resolve(Vocabulary,Term) ->
+    error_logger:info_msg("Resolving ~p with dict ~p",[Vocabulary, Term]),
     case dict:find(Term, Vocabulary) of
         {ok, Value}   -> Value ;
         error         -> error
@@ -59,8 +60,8 @@ merge(Vocabularies) ->
 make_test() ->
     Props = [{a,"a"},{b,"b"},{c,"c"}],
     Vocabulary = make(Props),
-     ?assertEqual({ok, "a"}, dict:find(a,Vocabulary)),
-     ?assertEqual({ok, "b"}, dict:find(b,Vocabulary)),
+    ?assertEqual({ok, "a"}, dict:find(a,Vocabulary)),
+    ?assertEqual({ok, "b"}, dict:find(b,Vocabulary)),
     ?assertEqual({ok, "c"}, dict:find(c,Vocabulary)) .
 
 

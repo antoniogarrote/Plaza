@@ -19,10 +19,22 @@
               plaza_utils,
               plaza_sparql,
               plaza_ts_trees,
+              plaza_rabbit_backend,
+              plaza_comet_handler,
               psmerl,
               parser,
               uuid,
-              console]},
+              console,
+              plaza_admin_app,
+              plaza_apps]},
+   {env, [{administration_app, [{active, true},
+                                {environment, development},
+                                {repository_connections, [{development, [{node, 'sesame@nb-agarrote'},
+                                                                         {type, "memory"},
+                                                                         {persistent, "false"}]}
+                                                         ]}
+                               ]}
+         ]},
    {registered,[plaza_sup]},
    {applications, [kernel, stdlib]},
    {mod, {plaza_app,[]}},

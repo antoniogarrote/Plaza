@@ -60,17 +60,30 @@ stop(_State) ->
 
 %% Starts the server at the given Host and Port.
 cmd_app_start() ->
+    start_applications([sasl, mnesia, os_mon, rabbit]),
     application:start(plaza),
     ParsedArguments = cmd_line_options(default_values(),[app_module, app_name, env]),
+    start_admin_app(),
     gen_server:call(plaza_applications_controller, {start_plaza_application, ParsedArguments}) .
 
 
 cmd_console_start() ->
+    start_applications([sasl, mnesia, os_mon, rabbit]),
     error_logger:info_msg("Starting with console...",[]),
     application:start(plaza),
     ParsedArguments = cmd_line_options(default_values(),[app_module, app_name, env]),
+    start_admin_app(),
     console:start_link(ParsedArguments) .
 
+start_admin_app() ->
+    {ok, AdminOpts} = application:get_env(plaza,administration_app),
+    Env = plaza_utils:proplist_find(environment, AdminOpts),
+    case plaza_utils:proplist_find(active, AdminOpts) of
+        true   -> plaza_applications_controller:start_plaza_application([{name, "plaza_admin_app"},
+                                                                         {app, "plaza_admin_app"},
+                                                                         {env, atom_to_list(Env)}]) ;
+        _False -> dont_care
+    end .
 
 %% Default values for the application
 default_values() ->
@@ -128,3 +141,10 @@ show_help() ->
 %%%===================================================================
 
 
+start_applications([]) ->
+    ok ;
+start_applications([A | As]) ->
+    case application:start(A) of
+        {error,{already_started,rabbit}} -> start_applications(As);
+        ok                               -> start_applications(As)
+    end .

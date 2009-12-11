@@ -1,4 +1,4 @@
--module(blogs_resource) .
+-module(blogs) .
 
 -author("Antonio Garrote Hernandez") .
 
@@ -41,16 +41,23 @@ vocabulary() ->
 lifting('POST', Request, Response, Context, Application) ->
     plaza_web:lifting('POST', Request, Response, Context, Application, ?MODULE) ;
 lifting('GET', Request, Response, Context, Application) ->
-    plaza_web:lifting('GET', Request, Response, Context, Application, ?MODULE) .
+    plaza_web:lifting('GET', Request, Response, Context, Application, ?MODULE) ;
+lifting('DELETE', Request, Response, Context, Application) ->
+    plaza_web:lifting('DELETE', Request, Response, Context, Application, ?MODULE) .
+
 
 
 operation('POST', Request, Response, Context, Application) ->
     plaza_web:operation('POST', Request, Response, Context, Application, ?MODULE) ;
 operation('GET', Request, Response, Context, Application) ->
-    plaza_web:operation('GET', Request, Response, Context, Application, ?MODULE) .
+    plaza_web:operation('GET', Request, Response, Context, Application, ?MODULE) ;
+operation('DELETE', Request, Response, Context, Application) ->
+    plaza_web:operation('DELETE', Request, Response, Context, Application, ?MODULE) .
 
 
 lowering('POST', Request, Response, Context, Application) ->
     plaza_web:lowering('POST', Request, Response, Context, Application, ?MODULE) ;
 lowering('GET', Request, Response, Context, Application) ->
-    plaza_web:lowering('GET', Request, Response, Context, Application, ?MODULE) .
+    plaza_web:lowering('GET', Request, Response, Context, Application, ?MODULE) ;
+lowering('DELETE', Request, Response, Context, Application) ->
+    plaza_web:lowering('DELETE', Request, Response, Context, Application, ?MODULE) .

@@ -12,10 +12,13 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([proplist_find/2, select_environment/2, to_binary/1, split/2, strip_protocol/1, strip_protocol_domain/1]) .
--export([to_atom/1, dict_find/2, subbitstring/2, merge_dicts/2]) .
+-export([to_atom/1, dict_find/2, subbitstring/2, merge_dicts/2, trim_whitespace/1]) .
 
 
 %% Public API
+
+trim_whitespace(Input) -> re:replace(Input, "\\s+", "", [global]) .
+
 
 subbitstring(_BS1,BS2) when size(BS2) =:= 0 ->
     false ;
@@ -47,6 +50,8 @@ select_environment(Env, Props) ->
     proplist_find(Env, Props) .
 
 
+%% @todo
+%% Change all these from *_to_binary to term_to_binary
 to_binary(Data) when is_list(Data)   ->
     list_to_binary(Data) ;
 to_binary(Data) when is_binary(Data) ->
@@ -54,6 +59,7 @@ to_binary(Data) when is_binary(Data) ->
 to_binary(Data) when is_atom(Data)   ->
     list_to_binary(atom_to_list(Data)) .
 
+%% @todo
 to_atom(Data) when is_list(Data) ->
     list_to_atom(Data) ;
 to_atom(Data) when is_binary(Data) ->

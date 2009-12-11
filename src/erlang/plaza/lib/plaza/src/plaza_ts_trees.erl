@@ -91,6 +91,8 @@ detect(Dst,[Node | Nodes],Tree, Acum) ->
     end .
 
 
+%% @doc
+%% Builds the path to a metaresource given as Dst from aTSTreList
 metaresource_path_uri(Dst, TSTreeList) ->
     Path = lists:map(fun(C) -> atom_to_list(C) end, path(Dst, TSTreeList)),
     {_Last, Result} = lists:foldl(fun(C,{Last, Acum}) ->
@@ -105,6 +107,9 @@ metaresource_path_uri(Dst, TSTreeList) ->
                                   Path),
     Result .
 
+
+%% @doc
+%% Builds the path to a resource that is of the type of the given Dst from aTSTreList
 resource_path_uri(Dst, TSTreeList) ->
     Path = lists:map(fun(C) -> atom_to_list(C) end, path(Dst, TSTreeList)),
     lists:foldl(fun(C,Acum) ->
@@ -113,18 +118,67 @@ resource_path_uri(Dst, TSTreeList) ->
                 "",
                 Path) .
 
-% TSTreeUsers = [blogs, posts, comments],
-% TSTreeBlogs = [users, {posts, [comments]}]
-% TSTreePosts = [users, comments, blogs]
-% TSTreeComments = [users, posts]
+%%read_paths(Path, Src, Related, TSWriteTree) ->
+%%     ResPath = clean_ids_from_path(Path),
+%%     SubTree = plaza_ts_trees:get(ResPath, TSWriteTree),
+%%     SubTreeNodes = plaza_ts_trees:nodes(SubTree),
+%%     NotInSubtree = lists:filter(fun(N) ->
+%%                                         lists:member(N,SubTreeNodes)
+%%                                 end,
+%%                                 SubTreeNodes),
+%%     InSubtree = lists:filter(fun(N) ->
+%%                                      not lists:member(N,SubTreeNodes)
+%%                              end,
+%%                              SubTreeNodes),
 
-%% TSWrite = [{users,
-%%             [{blogs,
-%%               [{posts,
-%%                 [comments]}
-%%               ]}
-%%              ]}
-%%            ] .
+
+%% clean_ids_from_path(Path) ->
+%%     do_clean_ids_from_path(Path,0,[]) .
+%% do_clean_ids_from_path([],_,Acum) ->
+%%     lists:reverse(Acum) ;
+%% do_clean_ids_from_path([P|Ps], 0, Acum) ->
+%%     do_clean_ids_from_path(Ps, 1, [P | Acum]) ;
+%% do_clean_ids_from_path([_P|Ps], 1, Acum) ->
+%%     do_clean_ids_from_path(Ps, 0, Acum) .
+
+
+%% clean_resources_from_path(Path) ->
+%%     do_clean_resources_from_path(Path,1,[]) .
+%% do_clean_resources_from_path([],_,Acum) ->
+%%     lists:reverse(Acum) ;
+%% do_clean_resources_from_path([P|Ps], 0, Acum) ->
+%%     do_clean_resources_from_path(Ps, 1, [P | Acum]) ;
+%% do_clean_resources_from_path([_P|Ps], 1, Acum) ->
+%%     do_clean_resources_from_path(Ps, 0, Acum) .
+
+%% insert_ids_in_path(_Is, [], Acum) ->
+%%     lists:reverse(Acum) ;
+%% insert_ids_in_path([], _Ps, Acum) ->
+%%     lists:reverse(Acum) ;
+%% insert_ids_in_path([I|Is], [P|Ps], Acum) ->
+%%     insert_ids_in_path(Is, Ps, [I | [ P | Acum]]) .
+
+
+%% read_path_resource(Path, ResPath, TSReadTree, TSWriteTree, Acum) ->
+%%     Nodes = gb_trees:keys(TSReadTree),
+%%     Paths = lists:map(fun(Node) ->
+%%                               case plaza_ts_trees:get(ResPath ++ [Node], TSWriteTree) of
+%%                                   error ->  case Node =:= lists:nth(1,lists:reverse(ResPath)) of
+%%                                                 false -> follow_path(gb_trees:lookup(Node, TSReadTree), [[Node]], [{[Node], "/" ++ atom_to_list(Node)}]) ;
+%%                                                 true  -> Ids = clean_resources_from_path(Path),
+%%                                                          UpTree = lists:reverse(lists:nthtail(1,lists:reverse(ResPath))),
+%%                                                          follow_upstream_path(Ids,
+%%                                                                               gb_trees:lookup(Node, TSReadTree),
+%%                                                                               UpTree
+%%                                                                               [{insert_ids_in_path(Ids,UpTree), }
+
+%%                                             end ;
+%%                                   _Subp ->  follow_sub_path(gb_trees:lookup(Node, TSReadTree), ResPath ++ ["*",Node], [{ResPath ++ ["*",Node], "/" ++ atom_to_list(Node)}])
+%%                               end
+%%                       end,
+%%                       Nodes),
+%%     undefined .
+
 
 generate_trees(TSWriteTree, Tokens) ->
     Rs = lists:map(fun(N) -> generate_branches(N,"", [], Tokens) end,
@@ -134,25 +188,51 @@ generate_trees(TSWriteTree, Tokens) ->
 
 generate_branches({N, Subres}, Prefix, Acum, Tokens) ->
     Res = atom_to_list(N),
-    {ok, Props} = dict:find(N,Tokens),
-    {metaresource, MetaMod} = proplists:lookup(metaresource,Props),
-    {resource, Mod} = proplists:lookup(resource,Props),
     Metaresource = Prefix ++ "/" ++ Res,
-    Resource = Metaresource ++ "/:" ++ Res ++ "_id",
-    AcumP = [{Resource, {resource, Mod}} |
-             [ {Metaresource, {resource, MetaMod}} | Acum]],
-    Branches = lists:map(fun(SR) -> generate_branches(SR, Resource, [], Tokens) end,
-                         Subres),
-    lists:foldl(fun(L,Ac) -> Ac ++ L end, [], Branches) ++ AcumP;
+    {ok, Props} = dict:find(N,Tokens),
+    AcumP = case proplists:lookup(metaresource,Props) of
+                {metaresource, MetaMod} ->  [ {Metaresource, {resource, MetaMod}} | Acum] ;
+                _OtherP                 ->  Acum
+            end,
+    case proplists:lookup(resource,Props) of
+        {resource, Mod}  ->  Resource = Metaresource ++ "/:" ++ Res ++ "_id",
+                             AcumPP = [{Resource, {resource, Mod}} | AcumP],
+                             Branches = lists:map(fun(SR) -> generate_branches(SR, Resource, [], Tokens) end,
+                                                  Subres),
+                             lists:foldl(fun(L,Ac) -> Ac ++ L end, [], Branches) ++ AcumPP;
+        _Other           ->  AcumP
+    end ;
+
+%%     {metaresource, MetaMod} = proplists:lookup(metaresource,Props),
+%%     {resource, Mod} = proplists:lookup(resource,Props),
+%%     Metaresource = Prefix ++ "/" ++ Res,
+%%     Resource = Metaresource ++ "/:" ++ Res ++ "_id",
+%%     AcumP = [{Resource, {resource, Mod}} |
+%%              [ {Metaresource, {resource, MetaMod}} | Acum]],
+%%     Branches = lists:map(fun(SR) -> generate_branches(SR, Resource, [], Tokens) end,
+%%                          Subres),
+%%     lists:foldl(fun(L,Ac) -> Ac ++ L end, [], Branches) ++ AcumP;
+
 generate_branches(N, Prefix, Acum, Tokens) ->
     Res = atom_to_list(N),
-    {ok, Props} = dict:find(N,Tokens),
-    {metaresource, MetaMod} = proplists:lookup(metaresource,Props),
-    {resource, Mod} = proplists:lookup(resource,Props),
     Metaresource = Prefix ++ "/" ++ Res,
-    Resource = Metaresource ++ "/:" ++ Res ++ "_id",
-    [{Resource, {resource, Mod}} |
-     [ {Metaresource, {resource, MetaMod}} | Acum]] .
+    {ok, Props} = dict:find(N,Tokens),
+    AcumP = case proplists:lookup(metaresource,Props) of
+                {metaresource, MetaMod} ->  [ {Metaresource, {resource, MetaMod}} | Acum] ;
+                _OtherP                 ->  Acum
+            end,
+    AcumPP = case proplists:lookup(resource,Props) of
+                 {resource, Mod}  ->  Resource = Metaresource ++ "/:" ++ Res ++ "_id",
+                                      [{Resource, {resource, Mod}} | AcumP] ;
+                 _Other           ->  AcumP
+             end,
+    AcumPP .
+%%     {metaresource, MetaMod} = proplists:lookup(metaresource,Props),
+%%     {resource, Mod} = proplists:lookup(resource,Props),
+%%     Metaresource = Prefix ++ "/" ++ Res,
+%%     Resource = Metaresource ++ "/:" ++ Res ++ "_id",
+%%     [{Resource, {resource, Mod}} |
+%%      [ {Metaresource, {resource, MetaMod}} | Acum]] .
 
 
 %% Tests

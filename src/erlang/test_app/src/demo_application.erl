@@ -27,11 +27,11 @@ write_tree() -> [blogs] .
 
 routes() ->
     [{"/expose",    {demo_application, expose_request}} ] .
-%%      {"/Blogs/:id", {resource, blog_resource}},
-%%      {"/Blogs",     {resource, blogs_resource}} ] .
+%%      {"/Blogs/:id", {resource, blog}},
+%%      {"/Blogs",     {resource, blogs}} ] .
 
 
-resources() -> [blogs_resource, blog_resource] .
+resources() -> [blogs, blog] .
 
 
 %% handlers

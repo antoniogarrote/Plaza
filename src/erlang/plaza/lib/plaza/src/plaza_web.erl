@@ -9,7 +9,7 @@
 
 -export([lifting/6, operation/6, lowering/6]) .
 -export([process_path_pattern/1, resolve_uri/6, parse_accept_header/1, build_default_sparql_query/6, query_sparql_repository/6]) .
--export([state_update/3, state_get/2, state_new/0, triple_spaces_for_request/6]) .
+-export([state_update/3, state_get/2, state_new/0, triple_spaces_for_request/6, combine/7, destroy_triple_space/6]) .
 -export([pattern_to_delete_in_update/6, triples_to_insert_in_update/6, update_triple_space/6]) .
 
 
@@ -64,6 +64,16 @@ lifting('PUT', Request, Response, State, Application, Resource) ->
                       fun triple_spaces_for_request/6,
                       fun pattern_to_delete_in_update/6,
                       fun triples_to_insert_in_update/6 ])
+    end ;
+
+lifting('DELETE', Request, Response, State, Application, Resource) ->
+    case Resource:is_metaresource() of
+        true ->
+            {error, ["Impossible to process PUT request for a metaresource", Resource:uri(), Request#request.parameters]} ;
+        false ->
+            combine('DELETE', Request, Response, State, Application, Resource,
+                    [ fun resolve_uri/6,
+                      fun triple_spaces_for_request/6 ])
     end .
 
 
@@ -82,7 +92,11 @@ operation('POST', Request, Response, State, Application, Resource) ->
 
 operation('PUT', Request, Response, State, Application, Resource) ->
     combine('PUT', Request, Response, State, Application, Resource,
-            [ fun update_triple_space/6 ]) .
+            [ fun update_triple_space/6 ]) ;
+
+operation('DELETE', Request, Response, State, Application, Resource) ->
+    combine('DELETE', Request, Response, State, Application, Resource,
+            [ fun destroy_triple_space/6 ]) .
 
 
 %% @doc
@@ -95,7 +109,11 @@ lowering('POST', Request, Response, State, Application, Resource) ->
     default_format_response('POST', Request, Response, State, Application, Resource) ;
 
 lowering('PUT', Request, Response, State, Application, Resource) ->
-    default_format_response('PUT', Request, Response, State, Application, Resource) .
+    default_format_response('PUT', Request, Response, State, Application, Resource) ;
+
+lowering('DELETE', Request, Response, State, Application, Resource) ->
+    {ok, ['DELETE', Request, Response#response{ body = "" }, State, Application, Resource]} .
+
 
 %% Functions
 
@@ -110,9 +128,9 @@ resolve_uri(Method, Request, Response, State, Application, Resource) ->
     %Uri    = Resource:uri(),
     Path    = case Resource:is_metaresource() of
                   true  -> plaza_ts_trees:metaresource_path_uri(Resource:url_token(),
-                                                                plaza_ts_trees:make((Application#plaza_app.application_module):write_tree())) ;
+                                                                Application#plaza_app.write_tree) ;
                   false -> plaza_ts_trees:resource_path_uri(Resource:url_token(),
-                                                            plaza_ts_trees:make((Application#plaza_app.application_module):write_tree()))
+                                                            Application#plaza_app.write_tree)
               end,
     Uri = "http://" ++ (Application#plaza_app.application_module):domain() ++ Path,
     error_logger:info_msg("Resolving URI: ~p with pattern ~p",[Uri, Params]),
@@ -136,7 +154,22 @@ query_sparql_repository(Method, Request, Response, State, Application, Resource)
     Triples = plaza_repository:sparql_query(Application, Query),
     Set = plaza_triples:set(lists:map(fun([{s,S},{p,P},{o,O}]) -> plaza_triples:t(S,P,O,Resource:triple_space()) end,
                                       Triples)),
-    {ok, [Method, Request, Response, state_update(rdf_triples, Set, State), Application, Resource]} .
+    error_logger:info_msg("checking if xblocking is set",[]),
+    case state_get(xblocking, State) of
+        false  -> case state_get(xsubscribe, State) of
+                      false -> error_logger:info_msg("Returning ok",[]),
+                               {ok, [Method, Request, Response, state_update(rdf_triples, Set, State), Application, Resource]} ;
+                      _Value  -> error_logger:info_msg("let's subscribe",[]),
+                               {push, [Method, Request, Response, state_update(rdf_triples, Set, State), Application, Resource]}
+                  end ;
+        _Value -> error_logger:info_msg("let's block",[]),
+                  case plaza_triples:set_length(Set) > 0 of
+                      true  -> error_logger:info_msg("Returning ok",[]),
+                               {ok, [Method, Request, Response, state_update(rdf_triples, Set, State), Application, Resource]} ;
+                      false -> error_logger:info_msg("Returning block",[]),
+                               {block, [Method, Request, Response, state_update(rdf_triples, Set, State), Application, Resource]}
+                  end
+    end .
 
 
 %% Builds a default SPARQL query for a resource
@@ -149,19 +182,24 @@ query_sparql_repository(Method, Request, Response, State, Application, Resource)
 %% @provides
 %%  - sparql_query
 build_default_sparql_query(Method, Request, Response, State, Application, Resource) ->
-    Uri = state_get(route, State),
-    Parameters = Request#request.parameters,
-    Vocabulary = Application#plaza_app.vocabulary,
-    Namespaces = Application#plaza_app.namespaces,
-    Contexts = state_get(triple_spaces, State),
-    error_logger:info_msg("Inserting datasets clause in sparql query with value ~p",[Contexts]),
-    DatasetClause = lists:foldl(fun(C,A) -> A ++ C end, "", [" FROM <" ++ Ctx ++">" || Ctx <- Contexts]),
-    error_logger:info_msg("Inserting datasets clause in sparql query with actual value ~p",[DatasetClause]),
-    Query = case Resource:is_metaresource() of
-                true  -> default_metaresource_sparql_query(Uri, DatasetClause, Parameters, Vocabulary, Namespaces, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0) ;
-                false -> default_sparql_query(Uri, DatasetClause, Parameters, Vocabulary, Namespaces, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0)
-            end,
-    {ok, [Method, Request, Response, state_update(sparql_query, Query,State), Application, Resource]} .
+    case state_get(xquery, State) of
+        false ->
+            Uri = state_get(route, State),
+            Parameters = Request#request.parameters,
+            Vocabulary = Application#plaza_app.vocabulary,
+            Namespaces = Application#plaza_app.namespaces,
+            Contexts = state_get(triple_spaces, State),
+            error_logger:info_msg("Inserting datasets clause in sparql query with value ~p",[Contexts]),
+            DatasetClause = lists:foldl(fun(C,A) -> A ++ C end, "", [" FROM <" ++ Ctx ++">" || Ctx <- Contexts]),
+            error_logger:info_msg("Inserting datasets clause in sparql query with actual value ~p",[DatasetClause]),
+            Query = case Resource:is_metaresource() of
+                        true  -> default_metaresource_sparql_query(Uri, DatasetClause, Parameters, Vocabulary, Namespaces, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0) ;
+                        false -> default_sparql_query(Uri, DatasetClause, Parameters, Vocabulary, Namespaces, "SELECT ?s ?p ?o" ++ DatasetClause ++ " WHERE { ", true, 0)
+                    end,
+            {ok, [Method, Request, Response, state_update(sparql_query, Query,State), Application, Resource]} ;
+    Query ->
+            {ok, [Method, Request, Response, state_update(sparql_query, Query,State), Application, Resource]}
+    end .
 
 
 %% @doc
@@ -221,7 +259,8 @@ update_triple_space(Method, Request, Response, State, Application, Resource) ->
     error_logger:info_msg("CONTEXTS UPDATE:~n~p~n",[ContextsUpdate]),
 
     case plaza_repository:update_graph(Application, BaseUrl, QueryDelete, ContextsDelete, ParsedTriples, ContextsUpdate, ?RDF_XML) of
-        ok     -> {ok, [Method, Request, Response#response{ code = 200 }, State, Application, Resource]} ;
+        ok    -> plaza_comet_handler:notify_triple_changes(state_get(route, State), TriplesUpdate, Request, Application, Resource),
+                 {ok, [Method, Request, Response#response{ code = 200 }, State, Application, Resource]} ;
         Other -> {error, ["Impossible to update resource in repository", Other, BaseUrl, Request#request.parameters]}
     end .
 
@@ -250,24 +289,27 @@ triples_to_insert_in_update(Method, Request, Response, State, Application, Resou
 triple_spaces_for_request(Method, Request, Response, State, Application, Resource) ->
     Contexts = case Resource:is_metaresource() of
                    true ->  case Method of
-                                'POST' -> [binary_to_list(state_get(new_resource_uri,State)) |
-                                           lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
-                                                     write_tree_for_resource(state_get(route,State), Resource, Application)) ] ;
-                                'GET'  -> [ state_get(route, State) |
+                                'POST'  -> [binary_to_list(state_get(new_resource_uri,State)) |
                                             lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
-                                                      read_tree_for_resource(state_get(route,State), Resource)) ]
+                                                      write_tree_for_resource(state_get(route,State), Resource, Application)) ] ;
+                                'GET'   -> [ state_get(route, State) |
+                                             lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
+                                                       read_tree_for_metaresource(Resource)) ] ;
+                                'DELETE' -> [ ]
                             end ;
                    false -> case Method of
                                 'GET'  -> MetaResource = Resource:metaresource(),
                                           [ state_get(route, State) |
                                             lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
-                                                      read_tree_for_resource(state_get(route,State), MetaResource)) ] ;
+                                                      read_tree_for_metaresource(MetaResource)) ] ;
                                 'PUT'  -> MetaResource = Resource:metaresource(),
                                           lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
-                                                    write_tree_for_resource(state_get(route,State), MetaResource, Application))
+                                                    write_tree_for_resource(state_get(route,State), MetaResource, Application)) ;
+                                'DELETE' -> lists:map(fun(R) -> "http://" ++ (Application#plaza_app.application_module):domain() ++ R end,
+                                                      write_tree_for_resource(state_get(route,State), Resource, Application))
                             end
                end,
-    error_logger:info_msg("Contexts for resource ~p :~n ~p ~n",[state_get(route,State), Contexts]),
+    error_logger:info_msg("Contexts for resource ~p and method ~p:~n ~p ~n",[state_get(route,State), Method, Contexts]),
     {ok, [Method, Request, Response, state_update(triple_spaces, Contexts, State), Application, Resource]} .
 
 
@@ -287,8 +329,28 @@ write_triple_space(Method, Request, Response, State, Application, Resource) ->
     error_logger:info_msg("ENCODED TRIPLES:~n~p~n",[ParsedTriples]),
     error_logger:info_msg("CONTEXTS:~n~p~n",[Contexts]),
     case plaza_repository:add_encoded_triples(Application, Resource:uri(), ParsedTriples, Contexts, ?RDF_XML) of
-        ok     -> {ok, [Method, Request, Response#response{ code = 201 }, State, Application, Resource]} ;
+        ok     -> plaza_comet_handler:notify_triple_changes(state_get(route, State), Triples, Request, Application, Resource),
+                  {ok, [Method, Request, Response#response{ code = 201 }, State, Application, Resource]} ;
         _Other -> {error, ["Impossible to create resource in repository", Resource:uri(), Request#request.parameters]}
+    end .
+
+
+%% @doc
+%% Destroys a triple space in the backend repository.
+%% @requires
+%%  -triple_spaces
+%% @updates
+%%  -Response#response.code
+destroy_triple_space(Method, Request, Response, State, Application, Resource) ->
+    Contexts = state_get(triple_spaces, State),
+    Res = state_get(route,State),
+    ContextsP = lists:filter(fun(TS) -> TS =/= Res end, Contexts),
+    error_logger:info_msg("DELETING TRIPLE SPACES:~n~p~n",[Res]),
+    error_logger:info_msg("REMOVING FROM TRIPLE SPACES:~n~p~n",[ContextsP]),
+    case plaza_repository:delete_graph(Application, Res, ContextsP) of
+        {ok, _Res} -> {ok, [Method, Request, Response#response{ code = 200 }, State, Application, Resource]} ;
+        Other      -> error_logger:info_msg("READ FROM REPOSITORY ~p",[Other]),
+                      {error, ["Impossible to DELETE triple space ~p and contexts ~", Res, ContextsP]}
     end .
 
 
@@ -302,19 +364,24 @@ write_triple_space(Method, Request, Response, State, Application, Resource) ->
 %%   - body
 default_format_response(Method, Request, Response, State, Application, Resource) ->
     Triples = state_get(rdf_triples, State),
+    error_logger:info_msg("Lowering triples ~p",[Triples]),
     ResponseP = Response#response{body = Triples},
-    Formats = parse_accept_header(Request),
+    FormatsP = parse_accept_header(Request),
+    error_logger:info_msg("Hey!",[]),
+    Formats = case state_get(xaccept, State) of
+                  false  ->  FormatsP ;
+                  F      ->  parse_formats(F)
+              end,
+    error_logger:info_msg("FORMATS PARSED: ~p",[Formats]),
     {{Type, Subtype},Body} = plaza_formaters:format(Formats, ResponseP, Application#plaza_app.vocabulary, Application#plaza_app.namespaces, Resource),
     Headers = Response#response.headers,
     %% @todo check if they are already present
     UpdatedHeaders = [{"Content-Type", Type++"/"++Subtype},{"Charset", "utf-8"} | Headers],
+    error_logger:info_msg("Lowering generated body ~p",[Body]),
     {ok, [Method, Request, Response#response{ headers = UpdatedHeaders, body = Body }, State, Application, Resource]} .
 
 
-
 %% private functions
-
-
 
 
 build_query_update_delete_query(_Subject, [], _Application, Query, _First, _Num) ->
@@ -358,9 +425,8 @@ extract_triple_spaces_from_uri(Path, WriteTree) ->
     RequestPathTokens = plaza_web:process_path_pattern(Path),
     error_logger:info_msg("Path tokens ~p", [RequestPathTokens]),
 
-    Tree = plaza_ts_trees:make(WriteTree),
-    error_logger:info_msg("Nodes tokens ~p", [plaza_ts_trees:nodes(Tree)]),
-    ResourceTokens = skip_prefix_from_request(RequestPathTokens, plaza_ts_trees:nodes(Tree)),
+    error_logger:info_msg("Nodes tokens ~p", [plaza_ts_trees:nodes(WriteTree)]),
+    ResourceTokens = skip_prefix_from_request(RequestPathTokens, plaza_ts_trees:nodes(WriteTree)),
     error_logger:info_msg("Resource tokens ~p", [ResourceTokens]),
     lists:nthtail(1,lists:reverse(lists:foldl(fun(E,[P | Ps]) -> [ P ++ "/" ++ E , P | Ps] end, [[]], ResourceTokens))) .
 
@@ -420,10 +486,26 @@ resolve_uri(Params, [P | Ps], Acum) ->
 do_combine(Params, []) -> {ok, Params} ;
 do_combine(Params, [F | Fs]) ->
     case apply(F,Params) of
-        {ok, ParamsP}   -> do_combine(ParamsP, Fs) ;
-        {error, Reason} -> {error, Reason} ;
-        Other           -> error_logger:error_msg("Unknown response combining function: ~p, ~p, ~p",[F, Params, Other]),
-                           {error, ["Unkown response", Other]}
+        {ok, ParamsP}    -> do_combine(ParamsP, Fs) ;
+        {error, Reason}  -> {error, Reason} ;
+        {block, ParamsP} -> error_logger:info_msg("block received starting comet handler",[]),
+                            plaza_comet_handler:start_link(block, self(), Fs, ParamsP),
+                            receive
+                                BlockingRes ->
+                                    error_logger:info_msg("Received from blocking comet handler ~p",[BlockingRes]),
+                                    BlockingRes
+                            end;
+        {push, ParamsP}  -> error_logger:info_msg("block received starting comet handler with functions ~p",[Fs]),
+                            plaza_comet_handler:start_link(push, self(), Fs, ParamsP),
+                            %% receive
+%%                                 BlockingRes ->
+%%                                     error_logger:info_msg("Received from subscribed/push comet handler ~p",[BlockingRes]),
+%%                                     {push, BlockingRes}
+%%                             end;
+                            {push, do_combine(ParamsP, Fs)} ;
+        Other            -> error_logger:error_msg("Unknown response combining function: ~p",[F]),
+                            error_logger:error_msg("Unknown response term: ~p",[Other]),
+                            {error, ["Unkown response", Other]}
 
     end .
 
@@ -478,7 +560,7 @@ parse_accept_header(Request) ->
 %% Transforms a Accept HTTP header string into
 %% a list of tuples {"type","subtype"}
 parse_formats(AcceptHeader) ->
-    Hs = plaza_utils:split(AcceptHeader, ","),
+    Hs = plaza_utils:split(plaza_utils:trim_whitespace(AcceptHeader), ","),
     Ls = lists:map(fun(H) ->
                            Tmp = plaza_utils:split(H,";"),
                            case Tmp of
@@ -487,7 +569,12 @@ parse_formats(AcceptHeader) ->
                            end
                    end,
                    Hs),
-    lists:map(fun([F,S]) -> {F,S} end, Ls) .
+    lists:map(fun(Parsed) ->
+                      case Parsed of
+                          [F,S] -> {F,S} ;
+                          [S]   -> {"*",S}
+                      end
+              end, Ls) .
 
 
 rdf_graph_from_request_params(Subject, Dataset, Request, Vocabulary, Namespaces) ->
@@ -504,36 +591,39 @@ do_rdf_graph_params(Subject, Dataset, [{P,V}| Params], Vocabulary, Namespaces, S
     end .
 
 
-%% @doc
-%% Retrieves a set of URIs for the the resources' tree of
-%% a certain resource.
-%% The Uri of the resource and the associated meta resource
-%% must be provided as arguments.
-read_tree_for_resource(_Uri, MetaResource) ->
-    Tree = plaza_ts_trees:make(MetaResource:read_tree()),
-    Nodes = plaza_ts_trees:nodes(Tree),
-    [ R:uri() || R <- Nodes] .
+%% %% @doc
+%% %% Retrieves a set of URIs for the the resources' tree of
+%% %% a certain resource.
+%% %% The Uri of the resource and the associated meta resource
+%% %% must be provided as arguments.
+%% read_tree_for_resource(_Uri, MetaResource) ->
+%%     Tree = plaza_ts_trees:make(MetaResource:read_tree()),
+%%     Nodes = plaza_ts_trees:nodes(Tree),
+%%     [ R:uri() || R <- Nodes] .
 
 
 %% @doc
 %% Computes the triple spaces for a meta resource based in its
 %% associated resource's tree.
 read_tree_for_metaresource(MetaResource) ->
-    Tree = plaza_ts_trees:make(MetaResource:read_tree()),
-    Nodes = plaza_ts_trees:nodes(Tree),
-    [ R:uri() || R <- Nodes].
+    Related = MetaResource:read_tree(),
+    lists:map(fun(N) ->
+                      N:uri()
+              end,
+              Related) .
 
 
 write_tree_for_resource(Uri, _MetaResource, Application) ->
-    extract_triple_spaces_from_uri(Uri, (Application#plaza_app.application_module):write_tree()) .
+    extract_triple_spaces_from_uri(Uri, Application#plaza_app.write_tree) .
 %%     Tree = plaza_ts_trees:make((Application#plaza_app.application_module):write_tree()),
 %%     Path = plaza_ts_trees:path(MetaResource, Tree),
 %%     [Uri | Path] .
 
-write_tree_for_metaresource(Uri, _MetaResource, Application) ->
-    extract_triple_spaces_from_uri(Uri, (Application#plaza_app.application_module):write_tree()) .
+%% write_tree_for_metaresource(Uri, _MetaResource, Application) ->
+%%     extract_triple_spaces_from_uri(Uri, (Application#plaza_app.application_module):write_tree()) .
 %%     Tree = plaza_ts_trees:make((Application#plaza_app.application_module):write_tree()),
 %%     plaza_ts_trees:path(MetaResource, Tree) .
+
 
 
 %% Tests

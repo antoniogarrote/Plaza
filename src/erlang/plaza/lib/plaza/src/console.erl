@@ -16,6 +16,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, code_change/3, terminate/2]).
 -export([repository_connect/0, repository_add_encoded_triples/3, repository_sparql_query/1, repository_full_graph/0]) .
 -export([repository_delete_graph/1]) .
+-export([tbox_create/2, tbox_update/2, tbox_clear/1]) .
 
 
 %% Public API
@@ -23,6 +24,23 @@
 
 start_link(ApplicationOptions) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [ApplicationOptions], []) .
+
+
+%% TBoxes
+
+
+%% console:tbox_create(plaza_admin_app,[{file, "/Users/antonio.garrote/ontologies/blogs/blogs.owl"},{format, "rdfxml"}]) .
+tbox_create(Application, Options) ->
+    plaza_admin_app:create_tbox(Application, Options) .
+
+tbox_update(Application, Options) ->
+    plaza_admin_app:update_tbox(Application, Options) .
+
+tbox_clear(Application) ->
+    plaza_admin_app:clear_tbox(Application) .
+
+
+%% Repository
 
 
 repository_connect() ->

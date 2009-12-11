@@ -60,13 +60,16 @@ init([]) ->
     Shutdown = 2000,
     Type = worker,
 
-     PlazaApplicationsController  = {plaza_applications_controller, {plaza_applications_controller, start_link, []},
-                                     Restart, Shutdown, Type, [plaza_applications_controller]},
+    PlazaRabbitBackend = {plaza_rabbit_backend, {plaza_rabbit_backend, start_link, []},
+                          Restart, Shutdown, Type, [plaza_rabbit_backend]},
 
-     PlazaWebserversController  = {plaza_webservers_controller, {plaza_webservers_controller, start_link, []},
-                                     Restart, Shutdown, Type, [plaza_webservers_controller]},
+    PlazaApplicationsController  = {plaza_applications_controller, {plaza_applications_controller, start_link, []},
+                                    Restart, Shutdown, Type, [plaza_applications_controller]},
 
-    {ok, {SupFlags, [PlazaApplicationsController, PlazaWebserversController]}}.
+    PlazaWebserversController  = {plaza_webservers_controller, {plaza_webservers_controller, start_link, []},
+                                  Restart, Shutdown, Type, [plaza_webservers_controller]},
+
+    {ok, {SupFlags, [PlazaRabbitBackend, PlazaApplicationsController, PlazaWebserversController]}}.
 
 %%%===================================================================
 %%% Internal functions

@@ -12,7 +12,7 @@
 -include_lib("eunit/include/eunit.hrl") .
 -include_lib("states.hrl") .
 
--export([connect/1, add_encoded_triples/4, add_encoded_triples/5, sparql_query/2, delete_graph/2, update_graph/7]) .
+-export([connect/1, add_encoded_triples/4, add_encoded_triples/5, sparql_query/2, delete_graph/3, update_graph/7]) .
 
 
 %% Some definitions of the messages exchanged with the
@@ -83,11 +83,12 @@ sparql_query(Config, Query) ->
     end .
 
 
-delete_graph(Config, Graph) when is_list(Graph) ->
+delete_graph(Config, Graph, ContextsDelete) when is_list(Graph) ->
     Opts = retrieve_repository_options(Config),
     Node = plaza_utils:proplist_find(node, Opts),
     error_logger:info_msg("Repository deleting graph ~p", [Graph]),
-    {?REPOSITORY_JAVA_MBOX, Node} ! {self(), ?DELETE_GRAPH_MESSAGE, [{'graph', Graph}]},
+    {?REPOSITORY_JAVA_MBOX, Node} ! {self(), ?DELETE_GRAPH_MESSAGE, [{graph, Graph},
+                                                                     {contexts_delete, ContextsDelete}]},
     receive
         {ok, Result} -> {ok, Result} ;
         Error        -> erlang:error("Error deleting graph from repository:" ++ Error, [Config, Graph])

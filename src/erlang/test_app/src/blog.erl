@@ -1,4 +1,4 @@
--module(blog_resource) .
+-module(blog) .
 
 -author("Antonio Garrote Hernandez") .
 
@@ -17,7 +17,7 @@ is_metaresource() -> false .
 
 read_tree() -> [] .
 
-metaresource() -> blogs_resource .
+metaresource() -> blogs .
 
 url_token() -> blogs .
 
@@ -29,16 +29,22 @@ operations() -> ['GET'] .
 lifting('GET', Request, Response, Context, Application) ->
     plaza_web:lifting('GET', Request, Response, Context, Application, ?MODULE) ;
 lifting('PUT', Request, Response, Context, Application) ->
-    plaza_web:lifting('PUT', Request, Response, Context, Application, ?MODULE) .
+    plaza_web:lifting('PUT', Request, Response, Context, Application, ?MODULE)  ;
+lifting('DELETE', Request, Response, Context, Application) ->
+    plaza_web:lifting('DELETE', Request, Response, Context, Application, ?MODULE) .
 
 
 operation('GET', Request, Response, Context, Application) ->
     plaza_web:operation('GET', Request, Response, Context, Application, ?MODULE) ;
 operation('PUT', Request, Response, Context, Application) ->
-    plaza_web:operation('PUT', Request, Response, Context, Application, ?MODULE) .
+    plaza_web:operation('PUT', Request, Response, Context, Application, ?MODULE)  ;
+operation('DELETE', Request, Response, Context, Application) ->
+    plaza_web:operation('DELETE', Request, Response, Context, Application, ?MODULE) .
 
 
 lowering('GET', Request, Response, Context, Application) ->
     plaza_web:lowering('GET', Request, Response, Context, Application, ?MODULE) ;
 lowering('PUT', Request, Response, Context, Application) ->
-    plaza_web:lowering('PUT', Request, Response, Context, Application, ?MODULE) .
+    plaza_web:lowering('PUT', Request, Response, Context, Application, ?MODULE) ;
+lowering('DELETE', Request, Response, Context, Application) ->
+    plaza_web:lowering('DELETE', Request, Response, Context, Application, ?MODULE) .

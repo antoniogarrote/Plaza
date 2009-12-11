@@ -23,5 +23,5 @@ public interface Adapter {
     public void addTriples(String baseUri, String triples, String[] contexts, String format) throws Exception;
     public OtpErlangList query(String sparqlQuery) throws Exception;
     public void updateTriples(String baseUri, String triplesToDeleteQuery, String triplesToAdd, String[] contextsToDelete, String[] contextsToInsert, String format) throws Exception;
-    public void delete(String graphUri) throws Exception;
+    public void delete(String graphUri, String[] contexts) throws Exception;
 }

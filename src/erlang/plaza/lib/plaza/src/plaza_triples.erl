@@ -14,7 +14,7 @@
 -include_lib("triples.hrl").
 
 -export([uri/2, uri/1, triple/3, triple/4, t/3, t/4, norm/2, set/0, set/1, set_add/4, set_add/5, literal/1, literal/3]).
--export([l/1, l/3]) .
+-export([l/1, l/3, set_length/1]) .
 
 
 %% Public API
@@ -83,6 +83,12 @@ set_add(S,P,O,C,Set) ->
 
 set_add(S,P,O,Set) ->
     gb_sets:add_element(t(S,P,O),Set) .
+
+
+%% @doc
+%% Number of triples in the set.
+set_length(S) ->
+    length(gb_sets:to_list(S)) .
 
 
 %% @doc

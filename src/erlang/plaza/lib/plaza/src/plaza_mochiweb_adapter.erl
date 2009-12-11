@@ -13,6 +13,7 @@
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("http_records.hrl").
+-include_lib("definitions.hrl").
 
 -export([start_link/2, update_routes/3, loop/3, handle_request/3, header/2]) .
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -84,7 +85,10 @@ handle_request(Request, Routes, DocRoot) ->
     PlazaRequest = make_request(Request),
     error_logger:info_msg("routing: ~p", [Request]),
     Response = route(PlazaRequest, Routes, DocRoot),
-    do_response(Response,Request) .
+    case Response of
+        {push, ResponseP, RemainingStages} -> do_push_response(ResponseP, Request, RemainingStages) ;
+        _RegularResponse                   -> do_response(Response,Request)
+    end.
 
 
 %% @doc
@@ -151,24 +155,63 @@ check_static_file(DocRoot, Path) ->
 
 
 %% @doc
+%% Check if special parameters are passed in the request.
+%% Supported parameters are:
+%% - xblocking  -> blocking request
+%% - xsubscribe -> subscribe to a query
+parse_special_parameters(Request, State) ->
+    do_parse_special_parameters(?SPECIAL_PARAMETERS, Request, State) .
+do_parse_special_parameters([], Request, State) ->
+    {Request, State} ;
+do_parse_special_parameters([{P,SP}|Ps], Request, State) ->
+    error_logger:info_msg("Parsing special parameter ~p in ~p",[P, Request#request.parameters]),
+    case proplists:get_value(P, Request#request.parameters) of
+        undefined  ->  error_logger:info_msg("not found",[]),
+                       do_parse_special_parameters(Ps, Request, plaza_web:state_update(SP, false, State)) ;
+        Value     ->  error_logger:info_msg("ok",[]),
+                      ParamsP = proplists:delete(P, Request#request.parameters),
+                      error_logger:info_msg("new params ~p",[ParamsP]),
+                      do_parse_special_parameters(Ps, Request#request{ parameters = ParamsP }, plaza_web:state_update(SP, Value, State))
+    end .
+
+
+%% @doc
 %% Process the routing of a request to a resource through the
 %% the cycle of lifting, operation and lowering.
 process_resource(Resource, Request, Response, State, Application) ->
-    do_processing_resource([lifting, operation, lowering], Resource, Request, Response, State, Application) .
+    {RequestP,StateP} = parse_special_parameters(Request, State),
+    do_processing_resource([lifting, operation, lowering], Resource, RequestP, Response, StateP, Application) .
+
+
+%% @doc
+%% Converts the http Method in a capitalized symbol
+%% if necessary.
+method_to_atom(Method) when is_list(Method) ->
+    list_to_atom(string:to_upper(Method)) ;
+method_to_atom(Method) -> Method .
+
 
 do_processing_resource([], _Resource, _Request, Response, _State, _Application) ->
     Response ;
 do_processing_resource([S | Stages], Resource, Request, Response, State, Application) ->
-    Method = Request#request.method,
+    Method = method_to_atom(Request#request.method),
     error_logger:info_msg("Processing resource: ~p, ~p, ~p",[Resource, S, Method]),
     case apply(Resource, S, [Method, Request, Response, State, Application]) of
         {ok, [_M, _R, ResponseP, StateP, _A, _Res]} -> do_processing_resource(Stages, Resource, Request, ResponseP, StateP, Application) ;
         {error, Reason}                             -> error_logger:info_msg("Error processing resource", [Resource, Reason]),
-                                                       #response{ code = 500,
-                                                                  headers = [{"Content-Type", "text/plain"},
-                                                                             {"Charset", "UTF-8"}],
-                                                                  body = lists:flatten(io_lib:format("~p",[Reason])) }
+                                                       default_handle_error(Reason) ;
+        %% TODO here handling blocking operations
+        {push,{ok, [_M, _R, ResponseP, StateP, _A, _Res]}} -> {push, do_processing_resource(Stages, Resource, Request, ResponseP, StateP, Application), Stages} ;
+        {push, {error, Reason}}                            -> error_logger:info_msg("Error processing resource", [Resource, Reason]),
+                                                              default_handle_error(Reason)
     end .
+
+
+default_handle_error(Reason) ->
+    #response{ code = 500,
+               headers = [{"Content-Type", "text/plain"},
+                          {"Charset", "UTF-8"}],
+               body = lists:flatten(io_lib:format("~p",[Reason])) } .
 
 
 do_route(Path, [], _Request) ->
@@ -205,7 +248,7 @@ make_request(Req) ->
               path = Req:get(path),
               headers = Req:get(headers),
               raw = Req,
-              parameters = Req:parse_qs() ++ Req:parse_post()} .
+              parameters = Req:parse_qs() ++ Req:parse_post() } .
 
 
 %% @doc
@@ -232,6 +275,50 @@ do_response(Response, Request) ->
                                                       Resp#response.headers,
                                                       Resp#response.body})
     end .
+
+
+%% @doc
+%% Composes a mochiweb response from plaza response record.
+do_push_response(PushResponse, Request, RemainingStages) ->
+    error_logger:info_msg("Doing push response ~p",[PushResponse]),
+    Resp = extract_push_response(PushResponse),
+    ChunkedResponse = Request:respond({Resp#response.code,
+                                       Resp#response.headers,
+                                       chunked}),
+    error_logger:info_msg("Writing through ~p",[ChunkedResponse]),
+    error_logger:info_msg("Writing chunk ~p",[Resp#response.body]),
+    ChunkedResponse:write_chunk(Resp#response.body),
+    push_response_cycle(Request, ChunkedResponse, RemainingStages) .
+
+push_response_cycle(Request, Response, RemainingStages) ->
+    receive
+        Received ->  Resp = extract_push_response(Received),
+                     case Resp of
+                         {ok, [_M, R, ResponseP, StateP, A, Res]} ->
+                             error_logger:info_msg("Push response cycle received push request",[]),
+                             error_logger:info_msg("Push response received triples: ~p",[plaza_web:state_get(rdf_triples, StateP)]),
+                             ResponsePP = do_processing_resource(RemainingStages, Res, R, ResponseP, StateP, A),
+                             error_logger:info_msg("Writing chunk ~p",[ResponsePP#response.body]),
+                             Response:write_chunk(ResponsePP#response.body),
+                             error_logger:info_msg("Chunked response written",[]),
+                             push_response_cycle(Request, Response, RemainingStages) ;
+                         {error, Reason} ->
+                             error_logger:info_msg("Error processing resource ~p", [Reason]),
+                             Response:write_chunk("") ;
+                         Other ->
+                             error_logger:info_msg("Push response cycle received unknown request ~p, EXITING...",[Other]),
+                             Response:write_chunk("")
+                     end
+        after ?PROXY_TIMEOUT ->
+                Response:write_chunk(?IDLE_MESSAGE),
+                push_response_cycle(Request, Response, RemainingStages)
+    end .
+
+%% @doc
+%% Extracts the response from the push or nested push tuples.
+extract_push_response({push, R}) ->
+    extract_push_response(R) ;
+extract_push_response(R) -> R .
 
 
 %% Tests
